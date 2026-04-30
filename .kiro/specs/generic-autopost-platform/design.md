@@ -1173,7 +1173,48 @@ public static class InvitedClubConstants
     public const string GeneralLogSourceObject = "Contents";
     public const string ImageFailureReason = "Image is not available.";
     public const string RequesterIdFailureReason = "RequesterId not found in HR Feed";
+
+    // SP names for feed operations
+    public const string UpdateSupplierLastDownloadTimeSp = "UpdateSupplierLastDownloadTime";
+    // Called after supplier/address/site download (before COA) with @configurations_id parameter
+    // Separate from UpdateLastDownloadTime which is called after full feed (including COA)
+
+    // Email config fields (from GetInvitedClubsEmailConfigPerJob SP)
+    // EmailToHelpDesk: recipients for image failure email (NOT EmailTo)
+    // EmailTemplateImageFail: HTML template for image failure email
+    // EmailSubjectImageFail: subject for image failure email
+    // EmailTemplate: HTML template for missing COA email
+    // EmailTo: recipients for missing COA email
 }
+```
+
+### 6.8 InvitedClubPostStrategy — Additional Implementation Notes
+
+```csharp
+// GLDate handling: WHEN invoice POST fails (non-201), clear GLDate to NULL
+// SQL: UPDATE {HeaderTable} SET GlDate = NULL WHERE UID = @uid
+// This is called BEFORE routing to InvitedFailPostQueueId
+
+// api_response_configuration loading:
+// Called at start of PostData for BOTH auto and manual modes
+// Query: SELECT response_type, response_code, response_message
+//        FROM api_response_configuration WHERE job_id=@job_id
+// Used to populate InvoicePostResponse.ResponseCode and ResponseMessage
+// for POST_SUCCESS and RECORD_NOT_POSTED response types
+
+// EmailConfig fields for image failure email:
+// - Send to: emailConfig.EmailToHelpDesk (split by ';') — NOT emailConfig.EmailTo
+// - Template: emailConfig.EmailTemplateImageFail (HTML template file path)
+// - Subject: emailConfig.EmailSubjectImageFail
+// - Placeholder: #MissingImagesTable# replaced with GenerateHtmlTable() output
+// - Condition: ONLY send when EmailTemplateImageFail is not null/whitespace
+//              AND EmailToHelpDesk has non-zero length
+
+// Infinite timeout for ALL Oracle Fusion API calls:
+// RestSharp: new RestClient(new RestClientOptions { MaxTimeout = -1 })
+// OR: request.Timeout = -1 (milliseconds, -1 = infinite)
+// Applies to: invoice POST, attachment POST, calculateTax POST,
+//             supplier GET, supplier address GET, supplier site GET, COA GET
 ```
 
 ---
@@ -1214,6 +1255,73 @@ public class SevitaConfig
     public string ClientSecret { get; set; } = string.Empty;
     public int TokenExpirationMin { get; set; } = 60;
 }
+```
+
+### 7.2a Sevita InvoiceRequest Model (Complete)
+
+```csharp
+// IPS.AutoPost.Plugins/Sevita/Models/InvoiceRequest.cs
+public class InvoiceRequest
+{
+    // Core invoice fields
+    public string vendorId { get; set; } = string.Empty;
+    public string edenredInvoiceId { get; set; } = string.Empty;  // = documentId.Trim()
+    public string employeeId { get; set; } = string.Empty;
+    public bool payAlone { get; set; }
+    public bool invoiceRelatedToZycusPurchase { get; set; }
+    public string? zycusInvoiceNumber { get; set; }  // Only when invoiceRelatedToZycusPurchase=true
+    public string invoiceNumber { get; set; } = string.Empty;
+    public string invoiceDate { get; set; } = string.Empty;
+    public string expensePeriod { get; set; } = string.Empty;
+    public string checkMemo { get; set; } = string.Empty;  // Default "PO#" if empty for PO records
+    public string? cerfTrackingNumber { get; set; }  // Required if any line naturalAccountNumber="174098"
+    public bool remittanceRequired { get; set; }
+    public List<AttachmentRequest> attachments { get; set; } = new();
+    public List<InvoiceLine> lineItems { get; set; } = new();
+}
+
+public class InvoiceLine
+{
+    public string alias { get; set; } = string.Empty;
+    public decimal amount { get; set; }              // Formatted to 2 decimal places
+    public string naturalAccountNumber { get; set; } = string.Empty;
+    public string edenredLineItemId { get; set; } = string.Empty;  // = edenredInvoiceId + "_" + lineItemCount
+}
+
+public class AttachmentRequest
+{
+    public string fileName { get; set; } = string.Empty;
+    public string fileBase { get; set; } = string.Empty;  // base64 — nulled out before saving to history
+    public string fileUrl { get; set; } = string.Empty;
+    public string docid { get; set; } = string.Empty;
+}
+
+// Sevita API response
+public class InvoiceResponse
+{
+    public int Status { get; set; }
+    public string? InvoiceId { get; set; }
+    public string? Result { get; set; }
+    public string? ErrorMsg { get; set; }
+}
+
+// api_response_configuration loading (same as InvitedClub)
+// Query: SELECT response_type, response_code, response_message
+//        FROM api_response_configuration WHERE job_id=@job_id
+// Used for manual post response type lookups (POST_SUCCESS, RECORD_NOT_POSTED)
+// Infinite timeout for Sevita API: Timeout = -1 in RestSharp
+```
+
+### 7.2b GetSevitaHeaderAndDetailDataByItem SP
+
+```csharp
+// SP: GetSevitaHeaderAndDetailDataByItem
+// Parameter: @UID (long) — the workitem UID
+// Returns: DataSet with 2 tables:
+//   Table[0]: Header row (invoice header fields)
+//   Table[1]: Detail rows (line items)
+// Called for each workitem in the batch
+// Used to build InvoiceRequest payload
 ```
 
 ### 7.3 SevitaPlugin
