@@ -87,20 +87,20 @@
 
 ## Phase 2: Database Migration — EF Core + Seed Scripts
 
-- [ ] 7. Create EF Core DatabaseContext and migrations (generic tables only)
-  - [ ] 7.1 Implement AutoPostDatabaseContext (EF Core DbContext with DbSet for all 10 generic tables — NO DbSet for existing Workflow tables)
-  - [ ] 7.2 Configure entity mappings in OnModelCreating (all 10 generic tables with correct column types, constraints, indexes)
-  - [ ] 7.3 Create initial EF Core migration: `dotnet ef migrations add InitialGenericTables --project src/IPS.AutoPost.Core`
-  - [ ] 7.4 Verify generated migration SQL matches design.md section 5 schema exactly
-  - [ ] 7.5 Add `context.Database.Migrate()` call in FeedWorker and PostWorker Program.cs (auto-apply at startup)
-  - [ ] 7.6 Write integration test for EF Core migration using InMemory database (all 10 tables created, constraints enforced)
+- [x] 7. Create EF Core DatabaseContext and migrations (generic tables only)
+  - [x] 7.1 Implement AutoPostDatabaseContext (EF Core DbContext with DbSet for all 10 generic tables — NO DbSet for existing Workflow tables)
+  - [x] 7.2 Configure entity mappings in OnModelCreating (all 10 generic tables with correct column types, constraints, indexes)
+  - [x] 7.3 Create initial EF Core migration: `dotnet ef migrations add InitialGenericTables --project src/IPS.AutoPost.Core`
+  - [x] 7.4 Verify generated migration SQL matches design.md section 5 schema exactly
+  - [x] 7.5 Add `context.Database.Migrate()` call in FeedWorker and PostWorker Program.cs (auto-apply at startup)
+  - [x] 7.6 Write integration test for EF Core migration using InMemory database (all 10 tables created, constraints enforced)
 
-- [ ] 8. Create data seed scripts (existing client configurations)
-  - [ ] 8.1 Create INSERT script: populate generic_job_configuration from post_to_invitedclub_configuration (client_type='INVITEDCLUB')
-  - [ ] 8.2 Create INSERT script: populate generic_execution_schedule from GetExecutionSchedule data for InvitedClub
-  - [ ] 8.3 Create INSERT script: populate generic_job_configuration from post_to_sevita_configuration (client_type='SEVITA')
-  - [ ] 8.4 Create INSERT script: populate generic_execution_schedule for Sevita
-  - [ ] 8.5 Verify all existing stored procedures still callable with unchanged parameters (get_invitedclub_configuration, GetExecutionSchedule, InvitedClub_GetHeaderAndDetailData, InvitedClub_GetFailedImagesData, WORKITEM_ROUTE, GENERALLOG_INSERT, get_sevita_configurations, GetSevitaHeaderAndDetailDataByItem, UpdateSevitaHeaderPostFields)
+- [x] 8. Create data seed scripts (existing client configurations)
+  - [x] 8.1 Create INSERT script: populate generic_job_configuration from post_to_invitedclub_configuration (client_type='INVITEDCLUB')
+  - [x] 8.2 Create INSERT script: populate generic_execution_schedule from GetExecutionSchedule data for InvitedClub
+  - [x] 8.3 Create INSERT script: populate generic_job_configuration from post_to_sevita_configuration (client_type='SEVITA')
+  - [x] 8.4 Create INSERT script: populate generic_execution_schedule for Sevita
+  - [x] 8.5 Verify all existing stored procedures still callable with unchanged parameters (get_invitedclub_configuration, GetExecutionSchedule, InvitedClub_GetHeaderAndDetailData, InvitedClub_GetFailedImagesData, WORKITEM_ROUTE, GENERALLOG_INSERT, get_sevita_configurations, GetSevitaHeaderAndDetailDataByItem, UpdateSevitaHeaderPostFields)
 
 ---
 
