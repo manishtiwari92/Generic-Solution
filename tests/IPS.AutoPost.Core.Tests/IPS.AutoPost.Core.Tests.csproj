@@ -25,7 +25,11 @@
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="FsCheck" />
-    <PackageReference Include="FsCheck.Xunit" />
+    <PackageReference Include="FsCheck.Xunit">
+      <!-- FsCheck.Xunit pulls in xunit v2 which conflicts with xunit.v3.
+           Exclude the old xunit.core assembly from compilation to resolve the ambiguity. -->
+      <ExcludeAssets>compile</ExcludeAssets>
+    </PackageReference>
     
     <!-- EF Core InMemory -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />

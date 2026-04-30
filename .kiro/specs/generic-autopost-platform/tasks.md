@@ -22,10 +22,10 @@
   - [x] 1.12 Create global.json (pins .NET SDK to 10.0.100)
   - [x] 1.13 Create all folder structures per SOLUTION_STRUCTURE.md (Commands/, Handlers/, Behaviors/, Infrastructure/, Migrations/ in Core)
 
-- [ ] 2. Implement Core Data Access
-  - [ ] 2.1 Implement SqlHelper.cs (async ExecuteDatasetAsync, ExecuteNonQueryAsync, ExecuteScalarAsync, BulkCopyAsync, Param factory)
-  - [ ] 2.2 Implement DataTableExtensions.cs (GenerateHtmlTable, ToDataTable<T>, ConvertDataTable<T>)
-  - [ ] 2.3 Write unit tests for SqlHelper parameter factory and BulkCopy
+- [x] 2. Implement Core Data Access
+  - [x] 2.1 Implement SqlHelper.cs (async ExecuteDatasetAsync, ExecuteNonQueryAsync, ExecuteScalarAsync, BulkCopyAsync, Param factory)
+  - [x] 2.2 Implement DataTableExtensions.cs (GenerateHtmlTable, ToDataTable<T>, ConvertDataTable<T>)
+  - [x] 2.3 Write unit tests for SqlHelper parameter factory and BulkCopy
 
 - [ ] 3. Implement Core Interfaces and Models
   - [ ] 3.1 Implement IClientPlugin interface (ExecutePostAsync, ExecuteFeedDownloadAsync default, OnBeforePostAsync default, ClearPostInProcessAsync default)
