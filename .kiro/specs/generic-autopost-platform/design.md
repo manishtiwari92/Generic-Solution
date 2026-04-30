@@ -1328,14 +1328,18 @@ public class SevitaPostStrategy
         long itemId, string json, SevitaConfig clientConfig, CancellationToken ct);
 
     // POST to InvoicePostURL with Authorization: Bearer {token}
+    // IMPORTANT: Uses request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody)
+    //            NOT AddJsonBody — this is different from InvitedClub's calculateTax endpoint
     // Success: HTTP 201, extract InvoiceId from invoiceIds object first property name
-    // HTTP 500: special error message
+    // HTTP 500: special error message "Internal Server error occurred while posting invoice."
     // Other non-201: extract recordErrors, message, invoiceIds, failedRecords
     private async Task<InvoiceResponse> PostInvoiceAsync(
         string payload, GenericJobConfig config,
         SevitaConfig clientConfig, CancellationToken ct);
 
     // Save history with fileBase = null on all attachments
+    // IMPORTANT: Parse invoiceRequestJson as JArray (not JObject) because payload is "[{...}]"
+    //            Use JArray.Parse(invoiceRequestJson) then iterate items to null out fileBase
     // Table: sevita_posted_records_history
     // Columns: job_id, item_id, post_request, post_response, post_date, posted_by, manually_posted, Comment
     private async Task SaveHistoryAsync(
@@ -1346,10 +1350,57 @@ public class SevitaPostStrategy
     // Send failure notification email after batch
     // To: FailedPostConfiguration.EmailTo (split by ';')
     // Body: HTML table from failed records (IsSendNotification=true, excluding IsSendNotification column)
+    // IMPORTANT: Replace [[AppendTable]] placeholder (NOT #MissingImagesTable# which is InvitedClub's)
     // Uses GenerateHtmlTable() extension method
     private async Task SendNotificationEmailAsync(
         GenericJobConfig config, SevitaConfig clientConfig,
         List<PostFailedRecord> failedRecords, CancellationToken ct);
+}
+```
+
+### 7.7 SevitaPlugin — OnBeforePostAsync (ValidIds Loading)
+
+```csharp
+// IMPORTANT: Uses direct SqlConnection + SqlDataReader.NextResult() — NOT SqlHelper
+// SqlHelper.ExecuteDatasetAsync does not support multi-statement queries with NextResult()
+// Two result sets in one round trip:
+//   Result 1: SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed
+//   Result 2: SELECT EmployeeID FROM Sevita_Employee_Feed
+public override async Task OnBeforePostAsync(GenericJobConfig config, CancellationToken ct)
+{
+    await using var cn = new SqlConnection(config.DbConnectionString);
+    await cn.OpenAsync(ct);
+    await using var cmd = new SqlCommand(
+        "SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed; " +
+        "SELECT EmployeeID FROM Sevita_Employee_Feed", cn);
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+    _validIds = new ValidIds();
+    while (await reader.ReadAsync(ct))
+        _validIds.VendorIds.Add(reader.GetString(0));
+
+    await reader.NextResultAsync(ct);
+    while (await reader.ReadAsync(ct))
+        _validIds.EmployeeIds.Add(reader.GetString(0));
+}
+
+// IMPORTANT: SqlHelper.ConnectionString is set ONCE at startup — NOT per-configuration
+// Unlike InvitedClub which reassigns SqlHelper.ConnectionString per-configuration,
+// Sevita uses a single connection string for all operations.
+// The per-configuration assignment is commented out in the existing Sevita code.
+```
+
+### 7.8 SevitaConfig — DBErrorEmailConfiguration
+
+```csharp
+// Loaded from get_sevita_configurations SP result
+// Used for database error email notifications (separate from post failure emails)
+public class DBErrorEmailConfiguration
+{
+    public string ToEmailAddress { get; set; } = string.Empty;   // db_error_to_email_address
+    public string CcEmailAddress { get; set; } = string.Empty;   // db_error_cc_email_address
+    public string EmailSubject { get; set; } = string.Empty;     // db_error_email_subject
+    public string EmailTemplate { get; set; } = string.Empty;    // db_error_email_template
 }
 ```
 

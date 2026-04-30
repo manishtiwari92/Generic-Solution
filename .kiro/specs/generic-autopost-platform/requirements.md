@@ -1,12 +1,12 @@
-# Requirements Document
+﻿# Requirements Document
 
 ## Introduction
 
-The IPS.AutoPost Platform is a cloud-native .NET Core 10 solution that replaces 15+ separate Windows Service projects with a single unified invoice posting and feed download platform hosted on AWS. The platform uses a plugin architecture so that client-specific logic (such as Oracle Fusion integration for InvitedClub) is isolated in plugins, while all common operations — schedule checking, workitem fetching, queue routing, history recording, and logging — are handled by a generic core engine driven entirely by database configuration.
+The IPS.AutoPost Platform is a cloud-native .NET Core 10 solution that replaces 15+ separate Windows Service projects with a single unified invoice posting and feed download platform hosted on AWS. The platform uses a plugin architecture so that client-specific logic (such as Oracle Fusion integration for InvitedClub) is isolated in plugins, while all common operations â€” schedule checking, workitem fetching, queue routing, history recording, and logging â€” are handled by a generic core engine driven entirely by database configuration.
 
 The first client plugin to be implemented is **InvitedClub**, which integrates with Oracle Fusion Cloud Payables. InvitedClub must behave exactly as the current Windows Service implementation does today. All other 15+ clients will follow the same plugin pattern after InvitedClub is proven in production.
 
-The platform is deployed to AWS using ECS Fargate workers (not Lambda) to eliminate the 15-minute execution time limit. New clients are onboarded by inserting rows into the `generic_job_configuration` table and writing one plugin class — no new projects, no new deployments, no new infrastructure.
+The platform is deployed to AWS using ECS Fargate workers (not Lambda) to eliminate the 15-minute execution time limit. New clients are onboarded by inserting rows into the `generic_job_configuration` table and writing one plugin class â€” no new projects, no new deployments, no new infrastructure.
 
 ---
 
@@ -17,7 +17,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 - **CloudWatchMetrics**: Granular per-client metrics published via `ICloudWatchMetricsService` after each execution (PostStarted, PostCompleted, PostSuccessCount, PostFailedCount, PostDurationSeconds, FeedStarted, FeedCompleted, FeedRecordsDownloaded, FeedDurationSeconds, ImageRetryAttempted, ImageRetrySucceeded).
 - **DynamicRecord**: Schema-agnostic data model (`Dictionary<string, object?>`) used by `GenericRestPlugin` for building payloads from `generic_field_mapping` rows without knowing column names at compile time.
 - **EF Core Migrations**: The 10 new generic tables are managed by EF Core migrations (auto-applied at startup). Existing Workflow tables use SqlHelper only.
-- **SecretsManagerConfigurationProvider**: Config-path pattern — values starting with `/` in `ConnectionStrings` are fetched from Secrets Manager at startup. No special code needed in services.
+- **SecretsManagerConfigurationProvider**: Config-path pattern â€” values starting with `/` in `ConnectionStrings` are fetched from Secrets Manager at startup. No special code needed in services.
 - **SQS Consumer**: `MaxNumberOfMessages = 10` (not 1). Each message processed in its own DI scope (`_serviceProvider.CreateScope()`). Message deleted only after successful processing.
 - **Mode Override**: SQS message can carry optional `Mode` field to override runtime behavior without redeployment.
 - **Core_Engine**: The generic orchestration layer (`IPS.AutoPost.Core`) that handles all operations common to every client: schedule checking, workitem fetching, routing, history, and logging.
@@ -26,21 +26,21 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 - **Feed_Worker**: The ECS Fargate service (`IPS.AutoPost.Host.FeedWorker`) that polls `ips-feed-queue` and executes feed download jobs.
 - **Post_Worker**: The ECS Fargate service (`IPS.AutoPost.Host.PostWorker`) that polls `ips-post-queue` and executes invoice posting jobs.
 - **Scheduler_Lambda**: The AWS Lambda function that runs every 10 minutes, reads `generic_execution_schedule` from RDS, and synchronizes EventBridge Scheduler rules. It never touches invoices.
-- **EventBridge**: Amazon EventBridge Scheduler — the cloud alarm clock that fires cron-based triggers per job and drops messages into SQS queues.
-- **SQS**: Amazon Simple Queue Service — the message queue that decouples EventBridge triggers from Fargate workers and provides built-in retry and dead-letter queue (DLQ) support.
-- **DLQ**: Dead Letter Queue — an SQS queue that receives messages after 3 failed processing attempts, triggering an alert.
-- **RDS**: Amazon RDS SQL Server — the existing Workflow database (`ips-rds-database-1.cmrmduasa2gk.us-east-1.rds.amazonaws.com`, database `Workflow`). No schema changes are permitted to existing tables or stored procedures.
-- **S3**: Amazon S3 — object storage for invoice images (PDFs/TIFFs), feed archives, and output files.
-- **Secrets_Manager**: AWS Secrets Manager — the secure vault for all credentials (database passwords, API keys, SMTP passwords). No credentials are stored in config files or source code.
-- **CloudWatch**: Amazon CloudWatch — the central logging, metrics, and alerting service for the platform.
+- **EventBridge**: Amazon EventBridge Scheduler â€” the cloud alarm clock that fires cron-based triggers per job and drops messages into SQS queues.
+- **SQS**: Amazon Simple Queue Service â€” the message queue that decouples EventBridge triggers from Fargate workers and provides built-in retry and dead-letter queue (DLQ) support.
+- **DLQ**: Dead Letter Queue â€” an SQS queue that receives messages after 3 failed processing attempts, triggering an alert.
+- **RDS**: Amazon RDS SQL Server â€” the existing Workflow database (`ips-rds-database-1.cmrmduasa2gk.us-east-1.rds.amazonaws.com`, database `Workflow`). No schema changes are permitted to existing tables or stored procedures.
+- **S3**: Amazon S3 â€” object storage for invoice images (PDFs/TIFFs), feed archives, and output files.
+- **Secrets_Manager**: AWS Secrets Manager â€” the secure vault for all credentials (database passwords, API keys, SMTP passwords). No credentials are stored in config files or source code.
+- **CloudWatch**: Amazon CloudWatch â€” the central logging, metrics, and alerting service for the platform.
 - **Workitem**: A single invoice record in the `Workitems` table, identified by `ItemId`, associated with a `JobId` and a `StatusId` (queue position).
 - **PostInProcess**: A flag column on the index header table (e.g., `WFInvitedClubsIndexHeader.PostInProcess`) that is set to `1` before processing and cleared to `0` in a `finally` block, preventing concurrent duplicate posting.
-- **InvitedClub**: The first client plugin — integrates with Oracle Fusion Cloud Payables via REST API using Basic Authentication.
+- **InvitedClub**: The first client plugin â€” integrates with Oracle Fusion Cloud Payables via REST API using Basic Authentication.
 - **Oracle_Fusion**: The Oracle Fusion Cloud ERP system used by the InvitedClub client.
 - **InvoiceId**: The Oracle Fusion invoice identifier returned by the invoice POST API (HTTP 201). Stored in `WFInvitedClubsIndexHeader.InvoiceId`.
 - **AttachedDocumentId**: The Oracle Fusion attachment identifier returned by the attachment POST API (HTTP 201). Stored in `WFInvitedClubsIndexHeader.AttachedDocumentId`.
 - **UseTax**: A flag on `WFInvitedClubsIndexHeader.UseTax` (`YES`/`NO`) that controls whether `ShipToLocation` is included in invoice lines and whether the `calculateTax` API step is executed.
-- **COA**: Chart of Accounts — the Oracle Fusion GL account combinations downloaded and stored in `InvitedClubCOA`.
+- **COA**: Chart of Accounts â€” the Oracle Fusion GL account combinations downloaded and stored in `InvitedClubCOA`.
 - **generic_job_configuration**: The new generic table that replaces all 15 `post_to_xxx_configuration` tables. One row per client job.
 - **generic_execution_schedule**: The new generic table that stores cron expressions and HH:mm execution times per job.
 - **WORKITEM_ROUTE**: The existing stored procedure that routes a workitem to a target queue by updating its `StatusId`.
@@ -51,7 +51,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 - **EdenredApiUrlConfig**: An existing RDS table that stores S3 credentials (`BucketName`, `S3AccessKey`, `S3SecretKey`, `S3Region`) and the asset API URL used to initialize the `S3Utility` at startup.
 - **APIResponseType**: A model class with fields `ResponseType`, `ResponseCode`, and `ResponseMessage` populated from `api_response_configuration`.
 - **Orphaned_Invoice**: An invoice that has been successfully created in Oracle Fusion (has an `InvoiceId`) but whose attachment POST failed, leaving it without an `AttachedDocumentId`. Recovery is exclusively via `RetryPostImages`.
-- **SevitaPlugin**: The second client plugin — integrates with the Sevita AP system via REST API using OAuth2 client_credentials authentication.
+- **SevitaPlugin**: The second client plugin â€” integrates with the Sevita AP system via REST API using OAuth2 client_credentials authentication.
 - **ValidIds**: A runtime-loaded set of valid `VendorIds` (from `Sevita_Supplier_SiteInformation_Feed`) and `EmployeeIds` (from `Sevita_Employee_Feed`) used by SevitaPlugin to validate invoice records before posting.
 - **OnBeforePostAsync**: An `IClientPlugin` lifecycle hook called once per batch before the workitem loop, used for batch-level pre-loading (e.g., loading `ValidIds` for Sevita).
 - **FeedResult**: A result type returned by `IClientPlugin.ExecuteFeedDownload`. `FeedResult.NotApplicable()` signals that the plugin has no feed download step; the Core_Engine skips feed processing when this is returned.
@@ -87,9 +87,9 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 #### Acceptance Criteria
 
 1. THE Platform SHALL define an `IClientPlugin` interface with at minimum the following methods:
-   - `ExecutePost(GenericJobConfig config, IEnumerable<WorkitemData> workitems, PostContext context)` — processes all workitems in a batch.
-   - `ExecuteFeedDownload(GenericJobConfig config, FeedContext context)` — downloads feed data.
-   - `OnBeforePostAsync(GenericJobConfig config, CancellationToken ct)` — called ONCE before the workitem loop to allow batch-level pre-loading (e.g., Sevita loads `ValidIds` from `Sevita_Supplier_SiteInformation_Feed` and `Sevita_Employee_Feed` tables before processing any workitem). Default implementation returns `Task.CompletedTask` (no-op).
+   - `ExecutePost(GenericJobConfig config, IEnumerable<WorkitemData> workitems, PostContext context)` â€” processes all workitems in a batch.
+   - `ExecuteFeedDownload(GenericJobConfig config, FeedContext context)` â€” downloads feed data.
+   - `OnBeforePostAsync(GenericJobConfig config, CancellationToken ct)` â€” called ONCE before the workitem loop to allow batch-level pre-loading (e.g., Sevita loads `ValidIds` from `Sevita_Supplier_SiteInformation_Feed` and `Sevita_Employee_Feed` tables before processing any workitem). Default implementation returns `Task.CompletedTask` (no-op).
 2. THE Plugin_Registry SHALL map each `client_type` string to exactly one `IClientPlugin` implementation at application startup.
 3. WHEN the Plugin_Registry receives a `client_type` that has no registered plugin, THE Plugin_Registry SHALL throw a `PluginNotFoundException` with the unrecognized `client_type` value in the message.
 4. THE Platform SHALL ship with the following plugins registered at launch: `InvitedClubPlugin` (client_type = `"INVITEDCLUB"`) and `SevitaPlugin` (client_type = `"SEVITA"`).
@@ -109,8 +109,8 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL read all job configuration from the `generic_job_configuration` table, which SHALL contain at minimum: `id`, `client_type`, `job_id`, `job_name`, `is_active`, `source_queue_id`, `success_queue_id`, `primary_fail_queue_id`, `secondary_fail_queue_id`, `question_queue_id`, `header_table`, `detail_table`, `detail_uid_column`, `history_table`, `post_service_url`, `auth_type`, `auth_username`, `auth_password`, `allow_auto_post`, `download_feed`, `is_legacy_job`, `image_parent_path`, `new_ui_image_parent_path`, `feed_download_path`, and `client_config_json`. The `image_parent_path` field is used for legacy jobs; `new_ui_image_parent_path` is a separate field mapped from `post_to_invitedclub_configuration.new_ui_image_parent_path` for non-legacy jobs. The `auth_username` field stores the Basic Auth username or OAuth2 client_id for clients not using `client_config_json`; `auth_password` stores the corresponding Basic Auth password or OAuth2 client_secret; `detail_uid_column` stores the column name in the detail table that links to the header UID (e.g., used by Sevita as `detail_uid_column`). The `auth_type` field SHALL support the following values: `'BASIC'` (HTTP Basic Authentication — used by InvitedClub), `'OAUTH2'` (OAuth2 client_credentials Bearer token — used by Sevita), `'APIKEY'` (API key header), and `'NONE'` (no authentication). The `auth_type` value determines how the plugin authenticates to the external ERP API. For clients using `auth_type = 'OAUTH2'`, the following OAuth2-specific fields SHALL be stored in `client_config_json`: `api_access_token_url` (token endpoint URL), `client_id`, `client_secret`, and `token_expiration_min` (token cache duration in minutes). The plugin SHALL obtain a Bearer token using the `client_credentials` grant type and cache it until `token_expiration_min` minutes have elapsed.
-2. THE `client_config_json` field in `generic_job_configuration` SHALL store all client-specific configuration that does not fit the generic columns. For Sevita, this includes: `is_PO_record` (boolean — controls PO vs Non-PO validation rules), `post_json_path` (S3 path for saving request JSON before posting), `t_drive_location`, `new_ui_t_drive_location`, and `remote_path`. The plugin SHALL deserialize `client_config_json` into a typed client-specific config object at runtime.
+1. THE Platform SHALL read all job configuration from the `generic_job_configuration` table, which SHALL contain at minimum: `id`, `client_type`, `job_id`, `job_name`, `is_active`, `source_queue_id`, `success_queue_id`, `primary_fail_queue_id`, `secondary_fail_queue_id`, `question_queue_id`, `header_table`, `detail_table`, `detail_uid_column`, `history_table`, `post_service_url`, `auth_type`, `auth_username`, `auth_password`, `allow_auto_post`, `download_feed`, `is_legacy_job`, `image_parent_path`, `new_ui_image_parent_path`, `feed_download_path`, and `client_config_json`. The `image_parent_path` field is used for legacy jobs; `new_ui_image_parent_path` is a separate field mapped from `post_to_invitedclub_configuration.new_ui_image_parent_path` for non-legacy jobs. The `auth_username` field stores the Basic Auth username or OAuth2 client_id for clients not using `client_config_json`; `auth_password` stores the corresponding Basic Auth password or OAuth2 client_secret; `detail_uid_column` stores the column name in the detail table that links to the header UID (e.g., used by Sevita as `detail_uid_column`). The `auth_type` field SHALL support the following values: `'BASIC'` (HTTP Basic Authentication â€” used by InvitedClub), `'OAUTH2'` (OAuth2 client_credentials Bearer token â€” used by Sevita), `'APIKEY'` (API key header), and `'NONE'` (no authentication). The `auth_type` value determines how the plugin authenticates to the external ERP API. For clients using `auth_type = 'OAUTH2'`, the following OAuth2-specific fields SHALL be stored in `client_config_json`: `api_access_token_url` (token endpoint URL), `client_id`, `client_secret`, and `token_expiration_min` (token cache duration in minutes). The plugin SHALL obtain a Bearer token using the `client_credentials` grant type and cache it until `token_expiration_min` minutes have elapsed.
+2. THE `client_config_json` field in `generic_job_configuration` SHALL store all client-specific configuration that does not fit the generic columns. For Sevita, this includes: `is_PO_record` (boolean â€” controls PO vs Non-PO validation rules), `post_json_path` (S3 path for saving request JSON before posting), `t_drive_location`, `new_ui_t_drive_location`, and `remote_path`. The plugin SHALL deserialize `client_config_json` into a typed client-specific config object at runtime.
 3. THE Platform SHALL read execution schedules from the `generic_execution_schedule` table, which SHALL support both `execution_time` (HH:mm format, 30-minute window logic) and `cron_expression` (EventBridge cron/rate format).
 4. THE Platform SHALL read feed source configuration from the `generic_feed_configuration` table, which SHALL support `feed_source_type` values of `REST`, `FTP`, `SFTP`, `S3`, and `FILE`.
 5. THE Platform SHALL read queue routing rules from the `generic_queue_routing_rules` table using `result_type` values of `SUCCESS`, `FAIL_POST`, `FAIL_IMAGE`, `DUPLICATE`, `QUESTION`, and `TERMINATED`.
@@ -121,7 +121,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 4: AWS Infrastructure — Scheduler Lambda
+### Requirement 4: AWS Infrastructure â€” Scheduler Lambda
 
 **User Story:** As a platform engineer, I want a lightweight Lambda function that keeps EventBridge rules synchronized with the database schedule configuration, so that schedule changes take effect within 10 minutes without any manual AWS console work.
 
@@ -138,7 +138,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 5: AWS Infrastructure — SQS Queues
+### Requirement 5: AWS Infrastructure â€” SQS Queues
 
 **User Story:** As a platform engineer, I want SQS queues between EventBridge and the Fargate workers so that job triggers are durable, retryable, and decoupled from compute availability.
 
@@ -146,8 +146,8 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 1. THE Platform SHALL use two primary SQS queues: `ips-feed-queue` for feed download jobs and `ips-post-queue` for invoice posting jobs.
 2. THE Platform SHALL configure each primary SQS queue with:
-   - **Visibility timeout: 7200 seconds (2 hours)** — accommodates long-running invoice batches that may take over an hour to process.
-   - **Message retention period: 1,209,600 seconds (14 days)** — provides a longer window for investigation and retry.
+   - **Visibility timeout: 7200 seconds (2 hours)** â€” accommodates long-running invoice batches that may take over an hour to process.
+   - **Message retention period: 1,209,600 seconds (14 days)** â€” provides a longer window for investigation and retry.
    - **Maximum receive count: 3** before moving to the DLQ.
 3. THE Platform SHALL configure a Dead Letter Queue for each primary queue: `ips-feed-dlq` and `ips-post-dlq`.
 4. WHEN a message in `ips-post-queue` or `ips-feed-queue` has been received 3 times without being deleted, THE Platform SHALL move that message to the corresponding DLQ.
@@ -157,17 +157,17 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 6: AWS Infrastructure — ECS Fargate Workers
+### Requirement 6: AWS Infrastructure â€” ECS Fargate Workers
 
-**User Story:** As a platform engineer, I want ECS Fargate workers with no execution time limit so that long-running jobs (Media SOAP downloads at 30–40 minutes, 10,000+ invoice batches) complete reliably without timeout errors.
+**User Story:** As a platform engineer, I want ECS Fargate workers with no execution time limit so that long-running jobs (Media SOAP downloads at 30â€“40 minutes, 10,000+ invoice batches) complete reliably without timeout errors.
 
 #### Acceptance Criteria
 
 1. THE Platform SHALL deploy two ECS Fargate services: `ips-feed-worker` and `ips-post-worker`, each running the same `IPS.AutoPost.Core` and `IPS.AutoPost.Plugins` assemblies.
 2. THE Feed_Worker SHALL poll `ips-feed-queue` continuously and process one message at a time.
 3. THE Post_Worker SHALL poll `ips-post-queue` continuously and process one message at a time.
-4. THE Feed_Worker and Post_Worker ECS Services SHALL be configured with `DesiredCount: 1` and `MinCapacity: 1` — always keeping at least 1 task running at all times. This eliminates the 30–60 second cold start delay that would occur if tasks scaled to zero. The always-on task costs approximately $15–20/month per worker (~$35/month total for both), which is the price of instant responsiveness for manual post triggers from the Workflow UI. **Note: This platform has a manual post trigger where users wait for an immediate response — a 60-second cold start is unacceptable. Scale-to-zero is only appropriate for batch-only systems with no interactive triggers.**
-5. THE Platform SHALL configure Step Scaling for SQS-based scale-out with two tiers: (1) 1–10 messages visible → add 1 task (cooldown: 120 seconds); (2) >10 messages visible → add 2 tasks. Scale-in: when queue depth = 0 for 10 minutes (2 evaluation periods of 5 minutes each) → remove 1 task (cooldown: 600 seconds).
+4. THE Feed_Worker and Post_Worker ECS Services SHALL be configured with `DesiredCount: 1` and `MinCapacity: 1` â€” always keeping at least 1 task running at all times. This eliminates the 30â€“60 second cold start delay that would occur if tasks scaled to zero. The always-on task costs approximately $15â€“20/month per worker (~$35/month total for both), which is the price of instant responsiveness for manual post triggers from the Workflow UI. **Note: This platform has a manual post trigger where users wait for an immediate response â€” a 60-second cold start is unacceptable. Scale-to-zero is only appropriate for batch-only systems with no interactive triggers.**
+5. THE Platform SHALL configure Step Scaling for SQS-based scale-out with two tiers: (1) 1â€“10 messages visible â†’ add 1 task (cooldown: 120 seconds); (2) >10 messages visible â†’ add 2 tasks. Scale-in: when queue depth = 0 for 10 minutes (2 evaluation periods of 5 minutes each) â†’ remove 1 task (cooldown: 600 seconds).
 6. THE Platform SHALL configure additional scaling policies based on CPU and Memory utilization: scale out when CPU or Memory > 80% (2 evaluation periods of 5 minutes, cooldown 300 seconds); scale in when CPU or Memory < 20% (2 evaluation periods of 5 minutes, cooldown 300 seconds).
 7. THE Fargate workers SHALL have no execution time limit and SHALL process batches of any size without chunking or pagination imposed by the platform.
 8. THE Fargate workers SHALL run in private subnets within the IPS VPC and SHALL access RDS, S3, SQS, Secrets_Manager, and CloudWatch via VPC endpoints without traversing the public internet.
@@ -181,7 +181,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 7: AWS Infrastructure — Supporting Services
+### Requirement 7: AWS Infrastructure â€” Supporting Services
 
 **User Story:** As a platform engineer, I want S3, Secrets Manager, and CloudWatch properly integrated so that images are retrieved securely, credentials are never in code, and all operations are observable.
 
@@ -199,7 +199,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 8: Database Compatibility — No Schema Changes
+### Requirement 8: Database Compatibility â€” No Schema Changes
 
 **User Story:** As a database administrator, I want the platform to work with the existing Workflow database tables and stored procedures exactly as they are today, so that no migration risk is introduced.
 
@@ -211,17 +211,17 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 4. THE Platform SHALL use the existing `dbo.split` table-valued function for splitting comma-separated item ID lists in workitem queries.
 5. THE Platform SHALL use a connection pool with `Max Pool Size = 2000` as specified in the connection string.
 6. THE Platform SHALL use parameterized queries exclusively and SHALL NOT construct SQL strings by concatenating user-supplied values, except for table name substitution using values sourced from the trusted `generic_job_configuration` table.
-7. THE Platform SHALL call `get_invitedclub_configuration` with parameter `@IsNewUI` (bit): `@IsNewUI = 1` WHEN `callingApplication == "NEWUI"` (case-insensitive, trimmed comparison: `callingApplication.Trim().ToUpper() == "NEWUI"`), and `@IsNewUI = 0` for all other calling applications including `"API"`. The `CallingApplication.NEWUI` constant value is the string `"NEWUI"` (uppercase). WHEN `callingApplication == "NEWUI"`, BOTH `@IsNewUI = 1` is passed to `get_invitedclub_configuration` AND `processManually = true` is set — the same as any non-`"API"` calling application. The NEWUI path skips the auto-post loop and goes directly to the manual post path.
+7. THE Platform SHALL call `get_invitedclub_configuration` with parameter `@IsNewUI` (bit): `@IsNewUI = 1` WHEN `callingApplication == "NEWUI"` (case-insensitive, trimmed comparison: `callingApplication.Trim().ToUpper() == "NEWUI"`), and `@IsNewUI = 0` for all other calling applications including `"API"`. The `CallingApplication.NEWUI` constant value is the string `"NEWUI"` (uppercase). WHEN `callingApplication == "NEWUI"`, BOTH `@IsNewUI = 1` is passed to `get_invitedclub_configuration` AND `processManually = true` is set â€” the same as any non-`"API"` calling application. The NEWUI path skips the auto-post loop and goes directly to the manual post path.
 8. THE InvitedClubPlugin SHALL assign `SqlHelper.ConnectionString = configuration.DBConnectionString` at the start of processing each configuration in the loop. Each configuration row can have its own database connection string, allowing different jobs to connect to different databases.
 9. THE Platform SHALL read S3 credentials (`BucketName`, `S3AccessKey`, `S3SecretKey`, `S3Region`) from the `EdenredApiUrlConfig` table using `SELECT AssetApiUrl, BucketName, S3AccessKey, S3SecretKey, S3Region FROM EdenredApiUrlConfig`. The `S3Utility` SHALL be initialized with these values at startup.
 10. THE InvitedClubPlugin SHALL call `GetAPIResponseTypes(configuration)` at the start of each `PostData` execution (both auto and manual) to load response type mappings from `api_response_configuration` using the query `SELECT response_type, response_code, response_message FROM api_response_configuration WHERE job_id=@job_id`. The returned `APIResponseType` list SHALL be used to populate `InvoicePostResponse.ResponseCode` and `InvoicePostResponse.ResponseMessage` for `POST_SUCCESS` and `RECORD_NOT_POSTED` response types.
-11. THE Platform SHALL add `AND ISNULL(h.PostInProcess, 0) = 0` to the `GetWorkitemData` query as a new safety guard. The full query SHALL be: `SELECT w.ItemId, w.StatusId FROM Workitems w JOIN {HeaderTable} h ON w.ItemId = h.UID WHERE JobId = @JobId AND StatusId IN ({source_queue_id}) AND ISNULL(h.PostInProcess, 0) = 0`. **Note: The existing `GetWorkitemData` query does NOT include this filter — it is a deliberate improvement over the existing code.**
+11. THE Platform SHALL add `AND ISNULL(h.PostInProcess, 0) = 0` to the `GetWorkitemData` query as a new safety guard. The full query SHALL be: `SELECT w.ItemId, w.StatusId FROM Workitems w JOIN {HeaderTable} h ON w.ItemId = h.UID WHERE JobId = @JobId AND StatusId IN ({source_queue_id}) AND ISNULL(h.PostInProcess, 0) = 0`. **Note: The existing `GetWorkitemData` query does NOT include this filter â€” it is a deliberate improvement over the existing code.**
 12. THE Platform SHALL call `dbo.split(@itemids, ', ')` with a comma followed by a space (`', '`) as the delimiter when splitting item ID lists in `GetWorkitemDataByItemId`. This matches the existing stored function contract.
 13. WHEN performing incremental supplier address or supplier site updates, THE InvitedClubPlugin SHALL delete existing rows for the affected supplier IDs using `DELETE FROM {tableName} WHERE SupplierId IN ('{id1}','{id2}',...)` before bulk-inserting the new data. The supplier IDs are sourced from the trusted Oracle Fusion API response (not user input), so this string construction is acceptable. This is the existing behavior that must be preserved.
 
 ---
 
-### Requirement 9: InvitedClub Plugin — Feed Download
+### Requirement 9: InvitedClub Plugin â€” Feed Download
 
 **User Story:** As an InvitedClub operations user, I want the platform to download fresh supplier and COA data from Oracle Fusion daily, so that the Workflow system always has up-to-date vendor and GL account information for invoice indexing.
 
@@ -251,7 +251,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 10: InvitedClub Plugin — Image Retry (Pre-Post Housekeeping)
+### Requirement 10: InvitedClub Plugin â€” Image Retry (Pre-Post Housekeeping)
 
 **User Story:** As an InvitedClub operations user, I want the platform to automatically retry attaching invoice images that previously failed, so that invoices already created in Oracle Fusion get their PDF attachments without manual intervention.
 
@@ -269,7 +269,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 11: InvitedClub Plugin — Invoice Posting (3-Step Oracle Fusion Post)
+### Requirement 11: InvitedClub Plugin â€” Invoice Posting (3-Step Oracle Fusion Post)
 
 **User Story:** As an InvitedClub operations user, I want the platform to post approved invoices to Oracle Fusion Payables with their PDF attachments and optional tax calculation, so that vendors can be paid through the ERP system.
 
@@ -363,7 +363,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL route every workitem to exactly one queue (success, fail, image-fail, question, or terminated) after processing — no workitem SHALL remain in the source queue after a completed processing attempt.
+1. THE Platform SHALL route every workitem to exactly one queue (success, fail, image-fail, question, or terminated) after processing â€” no workitem SHALL remain in the source queue after a completed processing attempt.
 2. WHEN an unhandled exception occurs during workitem processing, THE Platform SHALL catch the exception, log it to CloudWatch, route the workitem to `primary_fail_queue_id`, and continue processing the next workitem.
 3. WHEN an SQS message fails processing 3 times, THE Platform SHALL move it to the DLQ and trigger an SNS alert, ensuring the failure is visible to the operations team.
 4. THE Platform SHALL write a history record to `generic_post_history` for every workitem processed, regardless of outcome.
@@ -390,7 +390,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
    - TCP port 1433 to `0.0.0.0/0` (SQL Server / RDS access).
    - TCP port 443 to `0.0.0.0/0` (HTTPS for AWS services and external ERP APIs).
    - TCP port 80 to `0.0.0.0/0` (HTTP outbound).
-   No inbound rules are needed — ECS Fargate tasks do not accept inbound connections.
+   No inbound rules are needed â€” ECS Fargate tasks do not accept inbound connections.
 9. THE Platform SHALL add an ingress rule to the existing RDS Security Group allowing TCP port 1433 from the ECS Security Group. This SHALL be implemented via an `AWS::EC2::SecurityGroupIngress` resource in CloudFormation, not by modifying the existing security group directly.
 
 ---
@@ -402,7 +402,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 #### Acceptance Criteria
 
 1. THE Post_Worker SHALL process a batch of 10,000 invoices for a single client without timeout, memory exhaustion, or data loss.
-2. THE Feed_Worker SHALL complete a Media SOAP feed download that takes 30–40 minutes without timeout.
+2. THE Feed_Worker SHALL complete a Media SOAP feed download that takes 30â€“40 minutes without timeout.
 3. THE Platform SHALL process each invoice in a batch independently so that a failure on one invoice does not prevent processing of subsequent invoices.
 4. THE Platform SHALL use `SqlBulkCopy` with a timeout of 600 seconds for all bulk feed data inserts into RDS.
 5. WHEN multiple clients have jobs scheduled at the same time, THE Platform SHALL scale Fargate tasks up to handle concurrent jobs, with each task processing one SQS message at a time.
@@ -469,7 +469,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 21: SevitaPlugin — Invoice Posting
+### Requirement 21: SevitaPlugin â€” Invoice Posting
 
 **User Story:** As a Sevita operations user, I want the platform to post approved invoices to the Sevita AP system with their PDF attachments and line item data, so that vendors can be paid through the Sevita system.
 
@@ -481,7 +481,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 3. FOR EACH workitem, THE SevitaPlugin SHALL load header and detail data by calling the stored procedure `GetSevitaHeaderAndDetailDataByItem` with parameter `@UID`.
 
-4. THE SevitaPlugin SHALL always retrieve the invoice image from S3 (never from local file system — no legacy job path). WHEN the image cannot be found, THE SevitaPlugin SHALL route the workitem to `FailedPostsQueueId`, update the `question` field with `"Image is not available."`, write a history record with empty `InvoiceRequestJson=""` and `InvoiceResponseJson=""` (Sevita ALWAYS writes history even for image failures — this differs from InvitedClub which does NOT write history for image-fail early exits), call `UpdateSevitaHeaderPostFields(@UID)` to clear the post-in-process state, add the record to the failed records list, and continue to the next workitem.
+4. THE SevitaPlugin SHALL always retrieve the invoice image from S3 (never from local file system â€” no legacy job path). WHEN the image cannot be found, THE SevitaPlugin SHALL route the workitem to `FailedPostsQueueId`, update the `question` field with `"Image is not available."`, write a history record with empty `InvoiceRequestJson=""` and `InvoiceResponseJson=""` (Sevita ALWAYS writes history even for image failures â€” this differs from InvitedClub which does NOT write history for image-fail early exits), call `UpdateSevitaHeaderPostFields(@UID)` to clear the post-in-process state, add the record to the failed records list, and continue to the next workitem.
 
 5. THE SevitaPlugin SHALL group detail rows by composite key (`alias` + `naturalAccountNumber`), sum the `LineAmount` for each group, and build `lineItems` array entries with `alias`, `naturalAccountNumber`, `amount` (formatted to 2 decimal places), and `edenredLineItemId` (= `edenredInvoiceId + "_" + lineItemCount`).
 
@@ -510,7 +510,7 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 15. THE SevitaPlugin SHALL call `UpdateSevitaHeaderPostFields(@UID)` (stored procedure) to clear the post-in-process state after each workitem, instead of a direct SQL UPDATE.
 
-16. AFTER processing all workitems in a batch, WHEN any workitems failed, THE SevitaPlugin SHALL send a failure notification email to `FailedPostConfiguration.EmailTo` (split by semicolon) using the `FailedPostConfiguration.EmailTemplate` HTML template with a `GenerateHtmlTable()` HTML table of failed records (excluding the `IsSendNotification` column). THE SevitaPlugin SHALL replace the `[[AppendTable]]` placeholder in the template with the generated HTML table. **Note: Sevita uses `[[AppendTable]]` as the placeholder — NOT `#MissingImagesTable#` which is InvitedClub's placeholder.**
+16. AFTER processing all workitems in a batch, WHEN any workitems failed, THE SevitaPlugin SHALL send a failure notification email to `FailedPostConfiguration.EmailTo` (split by semicolon) using the `FailedPostConfiguration.EmailTemplate` HTML template with a `GenerateHtmlTable()` HTML table of failed records (excluding the `IsSendNotification` column). THE SevitaPlugin SHALL replace the `[[AppendTable]]` placeholder in the template with the generated HTML table. **Note: Sevita uses `[[AppendTable]]` as the placeholder â€” NOT `#MissingImagesTable#` which is InvitedClub's placeholder.**
 
 17. THE SevitaPlugin SHALL call `get_sevita_configurations` stored procedure (with NO parameters) to load its configuration. This SP returns all Sevita configuration fields including email settings, OAuth2 credentials, queue IDs, and table names in a single result set.
 
@@ -518,13 +518,22 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 19. THE SevitaPlugin SHALL NOT perform any image retry (`RetryPostImages`). There is no orphaned invoice recovery mechanism for Sevita.
 
-20. THE SevitaPlugin SHALL use `DefaultUserId` from configuration as `userId` in auto mode, and the passed-in `userId` in manual mode — identical to InvitedClub behavior.
+20. THE SevitaPlugin SHALL use `DefaultUserId` from configuration as `userId` in auto mode, and the passed-in `userId` in manual mode â€” identical to InvitedClub behavior.
 
-21. THE SevitaPlugin SHALL call `GetAPIResponseTypes(configuration)` (from `api_response_configuration` table) at the start of each `PostData` execution for manual posts. The `sevita_response_configuration` table exists in the database but is NOT called in the current implementation — `GetSevitaPostResponseTypes` is defined but never invoked in `PostData`. The new platform SHALL preserve this existing behavior: only `api_response_configuration` is used for response type lookups.
+21. THE SevitaPlugin SHALL call `GetAPIResponseTypes(configuration)` (from `api_response_configuration` table) at the start of each `PostData` execution for manual posts. The `sevita_response_configuration` table exists in the database but is NOT called in the current implementation â€” `GetSevitaPostResponseTypes` is defined but never invoked in `PostData`. The new platform SHALL preserve this existing behavior: only `api_response_configuration` is used for response type lookups.
+22. THE SevitaPlugin SHALL set `SqlHelper.ConnectionString` ONCE at startup (not per-configuration in the processing loop). Unlike InvitedClub which reassigns `SqlHelper.ConnectionString` per-configuration, Sevita uses a single connection string for all operations. The per-configuration assignment is commented out in the existing Sevita code and SHALL NOT be implemented.
+
+23. THE SevitaPlugin SHALL load `ValidIds` in `OnBeforePostAsync` using a direct `SqlConnection` with `SqlDataReader.NextResult()` to read both result sets in a single round trip: `SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed; SELECT EmployeeID FROM Sevita_Employee_Feed`. This uses raw ADO.NET (not SqlHelper) because SqlHelper's `ExecuteDatasetAsync` does not support multi-statement queries with `NextResult()`.
+
+24. THE SevitaPlugin SHALL POST the invoice payload using `request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody)` — NOT `AddJsonBody`. This is different from InvitedClub's `calculateTax` endpoint which uses `AddJsonBody`. The `ParameterType.RequestBody` approach is required by the Sevita API contract.
+
+25. THE SevitaPlugin SHALL save history by parsing the `invoiceRequestJson` as a `JArray` (not `JObject`) before nulling out `fileBase` on each attachment, because the Sevita payload is wrapped in a JSON array `[{...}]`. The implementation SHALL use `JArray.Parse(invoiceRequestJson)` then iterate items to set `fileBase = null` on each attachment before serializing back to string for storage.
+
+26. THE SevitaPlugin SHALL load `DBErrorEmailConfiguration` from the `get_sevita_configurations` SP result, which includes fields: `db_error_to_email_address`, `db_error_cc_email_address`, `db_error_email_subject`, and `db_error_email_template`. This configuration is used for database error email notifications separate from the post failure notification email.
 
 ---
 
-### Requirement 22: Infrastructure as Code — CloudFormation and CI/CD Pipeline
+### Requirement 22: Infrastructure as Code â€” CloudFormation and CI/CD Pipeline
 
 **User Story:** As a DevOps engineer, I want all AWS infrastructure defined as CloudFormation templates split into three separate stacks and deployed via a three-job CI/CD pipeline, so that infrastructure, application, and monitoring can be deployed and updated independently with full traceability.
 
@@ -555,55 +564,66 @@ The platform is deployed to AWS using ECS Fargate workers (not Lambda) to elimin
 
 ---
 
-### Requirement 23: Architecture Patterns — MediatR, CorrelationId, Granular Metrics, EF Core
+### Requirement 23: Architecture Patterns â€” MediatR, CorrelationId, Granular Metrics, EF Core
 
 **User Story:** As a platform engineer, I want modern .NET architecture patterns (MediatR CQRS, Pipeline Behaviors, CorrelationId tracking, EF Core migrations, granular CloudWatch metrics) adopted from the production `GenericMissingInvoicesProcess` project, so that the platform is maintainable, testable, and observable at scale.
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL use MediatR Command/Handler pattern. The SQS consumers (FeedWorker, PostWorker) SHALL send `ExecutePostCommand` or `ExecuteFeedCommand` via `IMediator.Send()`. Handlers (`ExecutePostHandler`, `ExecuteFeedHandler`) SHALL contain all business logic. The SQS consumer SHALL know nothing about business logic — it only deserializes messages and sends commands.
+1. THE Platform SHALL use MediatR Command/Handler pattern. The SQS consumers (FeedWorker, PostWorker) SHALL send `ExecutePostCommand` or `ExecuteFeedCommand` via `IMediator.Send()`. Handlers (`ExecutePostHandler`, `ExecuteFeedHandler`) SHALL contain all business logic. The SQS consumer SHALL know nothing about business logic â€” it only deserializes messages and sends commands.
 
 2. THE Platform SHALL register MediatR Pipeline Behaviors that wrap every command automatically:
-   - `LoggingBehavior<TRequest, TResponse>` — logs command start/end with CorrelationId, no handler changes needed.
-   - `ValidationBehavior<TRequest, TResponse>` — runs FluentValidation before handler executes, throws `ValidationException` on failure.
+   - `LoggingBehavior<TRequest, TResponse>` â€” logs command start/end with CorrelationId, no handler changes needed.
+   - `ValidationBehavior<TRequest, TResponse>` â€” runs FluentValidation before handler executes, throws `ValidationException` on failure.
 
 3. THE Platform SHALL implement `ICorrelationIdService` using `AsyncLocal<string>` to store a unique correlation ID per SQS message. The correlation ID SHALL flow through all async calls automatically. The service SHALL call `LogContext.PushProperty("CorrelationId", id)` to inject the ID into every Serilog log entry.
 
 4. THE Serilog output template SHALL include `[{CorrelationId}]` so that all log entries for a job run are traceable in CloudWatch Logs Insights using `filter @message like /correlation-id-value/`.
 
 5. THE Platform SHALL implement `ICloudWatchMetricsService` that publishes granular per-client metrics after each execution. The following metrics SHALL be published to namespace `IPS/AutoPost/{env}`, dimensioned by `ClientType` and `JobId`:
-   - `PostStarted` — when PostWorker picks up SQS message
-   - `PostCompleted` — when batch finishes successfully
-   - `PostFailed` — when batch fails
-   - `PostSuccessCount` — number of invoices routed to success queue
-   - `PostFailedCount` — number of invoices routed to fail queue
-   - `PostDurationSeconds` — total batch duration
-   - `FeedStarted` — when FeedWorker picks up SQS message
-   - `FeedCompleted` — when feed download finishes
-   - `FeedRecordsDownloaded` — total records downloaded
-   - `FeedDurationSeconds` — total feed duration
-   - `ImageRetryAttempted` — when RetryPostImages runs
-   - `ImageRetrySucceeded` — when image retry succeeds
+   - `PostStarted` â€” when PostWorker picks up SQS message
+   - `PostCompleted` â€” when batch finishes successfully
+   - `PostFailed` â€” when batch fails
+   - `PostSuccessCount` â€” number of invoices routed to success queue
+   - `PostFailedCount` â€” number of invoices routed to fail queue
+   - `PostDurationSeconds` â€” total batch duration
+   - `FeedStarted` â€” when FeedWorker picks up SQS message
+   - `FeedCompleted` â€” when feed download finishes
+   - `FeedRecordsDownloaded` â€” total records downloaded
+   - `FeedDurationSeconds` â€” total feed duration
+   - `ImageRetryAttempted` â€” when RetryPostImages runs
+   - `ImageRetrySucceeded` â€” when image retry succeeds
 
 6. THE Platform SHALL implement `DynamicRecord` model as a schema-agnostic data structure with `Dictionary<string, object?> Fields` and a `GetValue<T>(string fieldName)` method. This model SHALL be used by `GenericRestPlugin` to build JSON payloads from `generic_field_mapping` table rows without knowing column names at compile time.
 
-7. THE Platform SHALL use Entity Framework Core to manage the 10 new generic tables (`generic_job_configuration`, `generic_execution_schedule`, `generic_feed_configuration`, `generic_auth_configuration`, `generic_queue_routing_rules`, `generic_post_history`, `generic_email_configuration`, `generic_feed_download_history`, `generic_execution_history`, `generic_field_mapping`). EF Core migrations SHALL be auto-applied at startup via `context.Database.Migrate()`. The existing Workflow tables (`Workitems`, `WFInvitedClubsIndexHeader`, etc.) SHALL NOT be managed by EF Core — they SHALL be accessed via SqlHelper only.
+7. THE Platform SHALL use Entity Framework Core to manage the 10 new generic tables (`generic_job_configuration`, `generic_execution_schedule`, `generic_feed_configuration`, `generic_auth_configuration`, `generic_queue_routing_rules`, `generic_post_history`, `generic_email_configuration`, `generic_feed_download_history`, `generic_execution_history`, `generic_field_mapping`). EF Core migrations SHALL be auto-applied at startup via `context.Database.Migrate()`. The existing Workflow tables (`Workitems`, `WFInvitedClubsIndexHeader`, etc.) SHALL NOT be managed by EF Core â€” they SHALL be accessed via SqlHelper only.
 
 8. THE Platform SHALL implement `SecretsManagerConfigurationProvider` in the `Infrastructure/` folder that scans the following `appsettings.json` sections for values starting with `/`, fetches them from AWS Secrets Manager in parallel (30-second timeout), and injects the real values back into `IConfiguration`. All other code SHALL read `IConfiguration` normally without knowing about Secrets Manager. The following secret paths SHALL be supported:
-   - `ConnectionStrings:Workflow` → `/IPS/Common/{env}/Database/Workflow` — full connection string (or JSON with `AppConnectionString` key for RDS-managed secrets)
-   - `Email:SmtpPassword` → `/IPS/Common/{env}/Smtp` — SMTP password for email notifications
-   - `ApiKey:Value` → `/IPS/Common/{env}/ApiKey` — API key for the manual post endpoint
-   - Oracle Fusion credentials → `/IPS/InvitedClub/{env}/PostAuth` — Basic Auth credentials (fetched by InvitedClubPlugin at runtime, not at startup)
-   - Sevita OAuth2 credentials → `/IPS/Sevita/{env}/PostAuth` — client_id and client_secret (fetched by SevitaPlugin at runtime, not at startup)
+   - `ConnectionStrings:Workflow` â†’ `/IPS/Common/{env}/Database/Workflow` â€” full connection string (or JSON with `AppConnectionString` key for RDS-managed secrets)
+   - `Email:SmtpPassword` â†’ `/IPS/Common/{env}/Smtp` â€” SMTP password for email notifications
+   - `ApiKey:Value` â†’ `/IPS/Common/{env}/ApiKey` â€” API key for the manual post endpoint
+   - Oracle Fusion credentials â†’ `/IPS/InvitedClub/{env}/PostAuth` â€” Basic Auth credentials (fetched by InvitedClubPlugin at runtime, not at startup)
+   - Sevita OAuth2 credentials â†’ `/IPS/Sevita/{env}/PostAuth` â€” client_id and client_secret (fetched by SevitaPlugin at runtime, not at startup)
    
-   The startup scan covers `ConnectionStrings`, `Email`, and `ApiKey` sections. Plugin-specific credentials (`PostAuth`) are fetched on-demand by each plugin using `ConfigurationService.GetSecretAsync()`. The pattern: `"Workflow": "/IPS/Common/{env}/Database/Workflow"` in appsettings.json → fetched at startup → replaced with real connection string. The `SecretsManagerConfigurationProvider` uses the default AWS credential provider chain (IAM role for ECS tasks in production, environment variables for local development).
+   The startup scan covers `ConnectionStrings`, `Email`, and `ApiKey` sections. Plugin-specific credentials (`PostAuth`) are fetched on-demand by each plugin using `ConfigurationService.GetSecretAsync()`. The pattern: `"Workflow": "/IPS/Common/{env}/Database/Workflow"` in appsettings.json â†’ fetched at startup â†’ replaced with real connection string. The `SecretsManagerConfigurationProvider` uses the default AWS credential provider chain (IAM role for ECS tasks in production, environment variables for local development).
 
 9. THE SQS consumers (FeedWorker, PostWorker) SHALL use `MaxNumberOfMessages = 10` (not 1) when polling SQS queues. This allows processing up to 10 messages per poll cycle, reducing API calls to SQS.
 
 10. THE SQS consumers SHALL create a new DI scope (`_serviceProvider.CreateScope()`) for EACH message processed. This prevents state leakage between messages. Each scope SHALL have its own `IMediator`, `ICorrelationIdService`, and all scoped services.
 
-11. THE `ExecutePostCommand` and `ExecuteFeedCommand` SHALL include an optional `Mode` field (string). The handler MAY check this field to override runtime behavior (e.g., `Mode = "DryRun"` skips actual posting, `Mode = "UAT"` overrides email API identifier). This allows behavior changes without redeployment — just send a different SQS message.
+11. THE `ExecutePostCommand` and `ExecuteFeedCommand` SHALL include an optional `Mode` field (string). The handler MAY check this field to override runtime behavior (e.g., `Mode = "DryRun"` skips actual posting, `Mode = "UAT"` overrides email API identifier). This allows behavior changes without redeployment â€” just send a different SQS message.
 
 12. THE Platform SHALL use xUnit v3 (latest version, `xunit.v3` package) for all tests, matching the `GenericMissingInvoicesProcess` production pattern.
 
 13. THE Platform SHALL use EF Core InMemory database provider (`Microsoft.EntityFrameworkCore.InMemory`) for integration tests. Tests SHALL create a fresh in-memory database per test using `UseInMemoryDatabase(Guid.NewGuid().ToString())`. This eliminates the need for a real database or Docker containers during testing.
+2. **No-Duplicate Routing Invariant**: FOR ALL workitems processed, THE Platform SHALL guarantee that each workitem ends in exactly one destination queue after processing â€” it SHALL NOT remain in the source queue and SHALL NOT be routed to more than one queue.
+3. **History Completeness Invariant**: FOR ALL batch executions, THE Platform SHALL guarantee that the count of history rows written equals the count of workitems where at least one external API call was attempted. Workitems that fail pre-API validation (image not found, RequesterId empty) SHALL NOT produce history rows.
+4. **UseTax Round-Trip Property**: FOR ALL invoice payloads built by InvitedClubPlugin, WHEN `UseTax = "NO"`, no invoice line SHALL contain `ShipToLocation`; WHEN `UseTax = "YES"`, every invoice line SHALL contain `ShipToLocation`.
+5. **Feed Idempotence Property**: FOR ALL feed download executions, running the feed download twice SHALL produce the same row count in the target tables as running it once (truncate-then-insert strategy).
+6. **Incremental Feed Subset Property**: FOR ALL incremental feed runs, the set of supplier IDs fetched incrementally SHALL be a subset of the full supplier ID list, and the count SHALL be less than or equal to the full count.
+7. **Pagination Completeness Property**: FOR ALL paginated API calls, the total records inserted into the database SHALL equal the sum of all items across all pages returned by the Oracle Fusion API.
+8. **Error Condition Routing Property**: FOR ALL error conditions, the workitem SHALL be routed to the correct fail queue: image-not-found â†’ `EdenredFailPostQueueId` with zero API calls; RequesterId-empty â†’ `InvitedFailPostQueueId` with zero API calls; invoice POST fail â†’ `InvitedFailPostQueueId`; attachment POST fail â†’ `EdenredFailPostQueueId`; calculateTax fail â†’ `InvitedFailPostQueueId`.
+9. **Retry Idempotence Property**: FOR ALL image retry executions, retrying an already-attached image SHALL NOT create a duplicate attachment in Oracle Fusion. The `ImagePostRetryCount` SHALL be incremented exactly once per retry attempt regardless of outcome.
+10. **SQS Delivery Guarantee Property**: FOR ALL SQS messages, a message SHALL be deleted from the queue if and only if the corresponding job completed successfully. Failed jobs SHALL leave the message visible for retry up to `maxReceiveCount = 3` times before moving to the DLQ.
+
+
