@@ -1,0 +1,160 @@
+# ============================================================
+# IPS.AutoPost Platform — .gitignore
+# .NET 10 | AWS ECS Fargate | C# 13
+# ============================================================
+
+# -------------------------------------------------------
+# Build output — NEVER commit these
+# -------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+artifacts/
+out/
+
+# -------------------------------------------------------
+# .NET / NuGet
+# -------------------------------------------------------
+project.lock.json
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# -------------------------------------------------------
+# Visual Studio
+# -------------------------------------------------------
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+Generated\ Files/
+ScaffoldingReadMe.txt
+MigrationBackup/
+.localhistory/
+*.binlog
+
+# -------------------------------------------------------
+# Visual Studio Code
+# -------------------------------------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/
+
+# -------------------------------------------------------
+# JetBrains Rider
+# -------------------------------------------------------
+.idea/
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# -------------------------------------------------------
+# Test results and code coverage
+# -------------------------------------------------------
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResult.xml
+nunit-*.xml
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+BenchmarkDotNet.Artifacts/
+
+# -------------------------------------------------------
+# Secrets and credentials — NEVER commit
+# -------------------------------------------------------
+*.pfx
+*.p12
+*.key
+appsettings.*.local.json
+secrets.json
+.env
+.env.*
+!.env.example
+
+# -------------------------------------------------------
+# AWS / Lambda
+# -------------------------------------------------------
+# Lambda deployment packages
+*.zip
+# SAM build output
+.aws-sam/
+
+# -------------------------------------------------------
+# Docker
+# -------------------------------------------------------
+# Local Docker override files (contain env-specific config)
+docker-compose.override.yml
+docker-compose.local.yml
+
+# -------------------------------------------------------
+# OS generated files
+# -------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# -------------------------------------------------------
+# Temporary files
+# -------------------------------------------------------
+*.tmp
+*.temp
+*~
+~$*
+
+# -------------------------------------------------------
+# SQL Server local files
+# -------------------------------------------------------
+*.mdf
+*.ldf
+*.ndf
+
+# -------------------------------------------------------
+# MSBuild / Compiler artifacts
+# -------------------------------------------------------
+*.ilk
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tlog
+*.vspscc
+*.vssscc
+*.pidb
+*.svclog
+*.scc
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.VC.opendb
+FodyWeavers.xsd
