@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>IPS.AutoPost.Plugins.Tests</RootNamespace>
+    <AssemblyName>IPS.AutoPost.Plugins.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Plugins\IPS.AutoPost.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- xUnit v3 -->
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    
+    <!-- Testing Tools -->
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="FsCheck" />
+    <PackageReference Include="FsCheck.Xunit" />
+    
+    <!-- HTTP Mock Server for Oracle Fusion and Sevita API integration tests -->
+    <PackageReference Include="WireMock.Net" />
+    
+    <!-- EF Core InMemory -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    
+    <!-- Code Coverage -->
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

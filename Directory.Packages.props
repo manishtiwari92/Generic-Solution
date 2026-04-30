@@ -1,0 +1,78 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- AWS SDK v4 — all packages must use the same major version -->
+    <PackageVersion Include="AWSSDK.SQS"                                         Version="4.0.2.27" />
+    <PackageVersion Include="AWSSDK.S3"                                          Version="4.0.22.1" />
+    <PackageVersion Include="AWSSDK.SecretsManager"                              Version="4.0.4.19" />
+    <PackageVersion Include="AWSSDK.CloudWatch"                                  Version="4.0.9.6" />
+    <PackageVersion Include="AWSSDK.CloudWatchLogs"                              Version="4.0.8.4" />
+    <PackageVersion Include="AWSSDK.EventBridge"                                 Version="4.0.5.28" />
+    <PackageVersion Include="AWSSDK.Scheduler"                                   Version="4.0.2.26" />
+    <PackageVersion Include="AWSSDK.Extensions.NETCore.Setup"                    Version="4.0.0" />
+    <PackageVersion Include="Amazon.Lambda.Core"                                 Version="2.5.0" />
+    <PackageVersion Include="Amazon.Lambda.Serialization.SystemTextJson"         Version="2.4.4" />
+
+    <!-- Data Access -->
+    <PackageVersion Include="Microsoft.Data.SqlClient"                           Version="6.1.1" />
+
+    <!-- HTTP Client -->
+    <PackageVersion Include="RestSharp"                                          Version="112.1.0" />
+
+    <!-- JSON -->
+    <PackageVersion Include="Newtonsoft.Json"                                    Version="13.0.3" />
+
+    <!-- Excel -->
+    <PackageVersion Include="ClosedXML"                                          Version="0.102.3" />
+    <PackageVersion Include="DocumentFormat.OpenXml"                             Version="2.20.0" />
+
+    <!-- Logging -->
+    <PackageVersion Include="Serilog"                                            Version="4.1.0" />
+    <PackageVersion Include="Serilog.Extensions.Hosting"                         Version="8.0.0" />
+    <PackageVersion Include="Serilog.AspNetCore"                                 Version="8.0.3" />
+    <PackageVersion Include="Serilog.Sinks.Console"                              Version="5.0.1" />
+    <PackageVersion Include="Serilog.Sinks.AwsCloudWatch"                        Version="3.0.77" />
+    <PackageVersion Include="AWS.Logger.SeriLog"                                 Version="4.0.2" />
+    <PackageVersion Include="Serilog.Settings.Configuration"                     Version="8.0.4" />
+
+    <!-- ASP.NET Core -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi"                       Version="10.0.0" />
+    <PackageVersion Include="Swashbuckle.AspNetCore"                             Version="6.9.0" />
+
+    <!-- Hosting -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting"                       Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions"          Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions"          Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration"                 Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions"    Version="10.0.0" />
+
+    <!-- MediatR: Command/Handler + Pipeline Behaviors -->
+    <PackageVersion Include="MediatR"                                            Version="14.1.0" />
+    <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection"   Version="14.1.0" />
+
+    <!-- FluentValidation: Used in ValidationBehavior pipeline -->
+    <PackageVersion Include="FluentValidation"                                   Version="11.8.0" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions"     Version="11.8.0" />
+
+    <!-- EF Core: Migrations for generic tables only -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore"                      Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer"            Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools"                Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design"               Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory"             Version="10.0.0" />
+
+    <!-- Testing — xUnit v3 -->
+    <PackageVersion Include="xunit.v3"                                           Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio"                          Version="3.1.4" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk"                             Version="17.12.0" />
+    <PackageVersion Include="Moq"                                                Version="4.20.72" />
+    <PackageVersion Include="FluentAssertions"                                   Version="6.12.2" />
+    <PackageVersion Include="FsCheck"                                            Version="3.1.0" />
+    <PackageVersion Include="FsCheck.Xunit"                                      Version="3.1.0" />
+    <PackageVersion Include="WireMock.Net"                                       Version="1.6.9" />
+    <PackageVersion Include="coverlet.collector"                                 Version="6.0.2" />
+  </ItemGroup>
+</Project>

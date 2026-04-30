@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>IPS.AutoPost.Plugins</RootNamespace>
+    <AssemblyName>IPS.AutoPost.Plugins</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RestSharp" />
+    <PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Include="ClosedXML" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <PackageReference Include="AWSSDK.S3" />
+  </ItemGroup>
+
+</Project>

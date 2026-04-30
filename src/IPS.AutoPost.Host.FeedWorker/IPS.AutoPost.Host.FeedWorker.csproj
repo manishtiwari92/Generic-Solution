@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>IPS.AutoPost.Host.FeedWorker</RootNamespace>
+    <AssemblyName>IPS.AutoPost.Host.FeedWorker</AssemblyName>
+    <UserSecretsId>ips-autopost-feedworker</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
+    <ProjectReference Include="..\IPS.AutoPost.Plugins\IPS.AutoPost.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.SQS" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>

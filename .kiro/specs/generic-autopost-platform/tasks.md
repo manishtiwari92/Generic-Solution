@@ -7,20 +7,20 @@
 
 ## Phase 1: Solution Scaffold and Core Infrastructure
 
-- [ ] 1. Create solution and project structure
-  - [ ] 1.1 Create IPS.AutoPost.Platform.sln
-  - [ ] 1.2 Create IPS.AutoPost.Core.csproj (.NET 10, packages: AWSSDK.SQS, AWSSDK.S3, AWSSDK.SecretsManager, AWSSDK.CloudWatch, AWSSDK.CloudWatchLogs, Microsoft.Data.SqlClient, MediatR, FluentValidation, Microsoft.EntityFrameworkCore, Microsoft.EntityFrameworkCore.SqlServer, Microsoft.EntityFrameworkCore.Tools, Microsoft.Extensions.Hosting, Serilog, Serilog.Sinks.AmazonCloudWatch)
-  - [ ] 1.3 Create IPS.AutoPost.Plugins.csproj (.NET 10, references Core, packages: RestSharp, Newtonsoft.Json, ClosedXML)
-  - [ ] 1.4 Create IPS.AutoPost.Host.FeedWorker.csproj (.NET 10 Worker Service, references Core + Plugins, packages: AWSSDK.SQS)
-  - [ ] 1.5 Create IPS.AutoPost.Host.PostWorker.csproj (.NET 10 Worker Service, references Core + Plugins, packages: AWSSDK.SQS)
-  - [ ] 1.6 Create IPS.AutoPost.Api.csproj (ASP.NET Core 10, references Core + Plugins)
-  - [ ] 1.7 Create IPS.AutoPost.Scheduler.csproj (AWS Lambda .NET 10, references Core)
-  - [ ] 1.8 Create IPS.AutoPost.Core.Tests.csproj (xUnit v3 — xunit.v3 package, FsCheck, Moq, FluentAssertions, Microsoft.EntityFrameworkCore.InMemory, coverlet.collector)
-  - [ ] 1.9 Create IPS.AutoPost.Plugins.Tests.csproj (xUnit v3, FsCheck, Moq, FluentAssertions, WireMock.Net, Microsoft.EntityFrameworkCore.InMemory, coverlet.collector)
-  - [ ] 1.10 Create Directory.Packages.props (centralized NuGet version management with all packages pinned)
-  - [ ] 1.11 Create Directory.Build.props (shared MSBuild properties: LangVersion=latest, Nullable=enable, ImplicitUsings=enable)
-  - [ ] 1.12 Create global.json (pins .NET SDK to 10.0.100)
-  - [ ] 1.13 Create all folder structures per SOLUTION_STRUCTURE.md (Commands/, Handlers/, Behaviors/, Infrastructure/, Migrations/ in Core)
+- [x] 1. Create solution and project structure
+  - [x] 1.1 Create IPS.AutoPost.Platform.sln
+  - [x] 1.2 Create IPS.AutoPost.Core.csproj (.NET 10, packages: AWSSDK.SQS, AWSSDK.S3, AWSSDK.SecretsManager, AWSSDK.CloudWatch, AWSSDK.CloudWatchLogs, Microsoft.Data.SqlClient, MediatR, FluentValidation, Microsoft.EntityFrameworkCore, Microsoft.EntityFrameworkCore.SqlServer, Microsoft.EntityFrameworkCore.Tools, Microsoft.Extensions.Hosting, Serilog, Serilog.Sinks.AmazonCloudWatch)
+  - [x] 1.3 Create IPS.AutoPost.Plugins.csproj (.NET 10, references Core, packages: RestSharp, Newtonsoft.Json, ClosedXML)
+  - [x] 1.4 Create IPS.AutoPost.Host.FeedWorker.csproj (.NET 10 Worker Service, references Core + Plugins, packages: AWSSDK.SQS)
+  - [x] 1.5 Create IPS.AutoPost.Host.PostWorker.csproj (.NET 10 Worker Service, references Core + Plugins, packages: AWSSDK.SQS)
+  - [x] 1.6 Create IPS.AutoPost.Api.csproj (ASP.NET Core 10, references Core + Plugins)
+  - [x] 1.7 Create IPS.AutoPost.Scheduler.csproj (AWS Lambda .NET 10, references Core)
+  - [x] 1.8 Create IPS.AutoPost.Core.Tests.csproj (xUnit v3 — xunit.v3 package, FsCheck, Moq, FluentAssertions, Microsoft.EntityFrameworkCore.InMemory, coverlet.collector)
+  - [x] 1.9 Create IPS.AutoPost.Plugins.Tests.csproj (xUnit v3, FsCheck, Moq, FluentAssertions, WireMock.Net, Microsoft.EntityFrameworkCore.InMemory, coverlet.collector)
+  - [x] 1.10 Create Directory.Packages.props (centralized NuGet version management with all packages pinned)
+  - [x] 1.11 Create Directory.Build.props (shared MSBuild properties: LangVersion=latest, Nullable=enable, ImplicitUsings=enable)
+  - [x] 1.12 Create global.json (pins .NET SDK to 10.0.100)
+  - [x] 1.13 Create all folder structures per SOLUTION_STRUCTURE.md (Commands/, Handlers/, Behaviors/, Infrastructure/, Migrations/ in Core)
 
 - [ ] 2. Implement Core Data Access
   - [ ] 2.1 Implement SqlHelper.cs (async ExecuteDatasetAsync, ExecuteNonQueryAsync, ExecuteScalarAsync, BulkCopyAsync, Param factory)
