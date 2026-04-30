@@ -27,62 +27,62 @@
   - [x] 2.2 Implement DataTableExtensions.cs (GenerateHtmlTable, ToDataTable<T>, ConvertDataTable<T>)
   - [x] 2.3 Write unit tests for SqlHelper parameter factory and BulkCopy
 
-- [ ] 3. Implement Core Interfaces and Models
-  - [ ] 3.1 Implement IClientPlugin interface (ExecutePostAsync, ExecuteFeedDownloadAsync default, OnBeforePostAsync default, ClearPostInProcessAsync default)
-  - [ ] 3.2 Implement GenericJobConfig model with all fields and GetClientConfig<T>()
-  - [ ] 3.3 Implement PostContext, PostBatchResult, PostItemResult models
-  - [ ] 3.4 Implement FeedResult (NotApplicable, Succeeded, Failed factory methods) and FeedContext
-  - [ ] 3.5 Implement ScheduleConfig, EdenredApiUrlConfig, GenericPostHistory, GenericExecutionHistory models
-  - [ ] 3.6 Implement PluginRegistry with PluginNotFoundException
-  - [ ] 3.7 Implement DynamicRecord model (Dictionary<string, object?> Fields, GetValue<T>(string fieldName) method — schema-agnostic data model for GenericRestPlugin)
-  - [ ] 3.8 Implement ICloudWatchMetricsService interface (12 metric methods)
-  - [ ] 3.9 Implement ICorrelationIdService interface (GetOrCreateCorrelationId, SetCorrelationId returning IDisposable)
+- [x] 3. Implement Core Interfaces and Models
+  - [x] 3.1 Implement IClientPlugin interface (ExecutePostAsync, ExecuteFeedDownloadAsync default, OnBeforePostAsync default, ClearPostInProcessAsync default)
+  - [x] 3.2 Implement GenericJobConfig model with all fields and GetClientConfig<T>()
+  - [x] 3.3 Implement PostContext, PostBatchResult, PostItemResult models
+  - [x] 3.4 Implement FeedResult (NotApplicable, Succeeded, Failed factory methods) and FeedContext
+  - [x] 3.5 Implement ScheduleConfig, EdenredApiUrlConfig, GenericPostHistory, GenericExecutionHistory models
+  - [x] 3.6 Implement PluginRegistry with PluginNotFoundException
+  - [x] 3.7 Implement DynamicRecord model (Dictionary<string, object?> Fields, GetValue<T>(string fieldName) method — schema-agnostic data model for GenericRestPlugin)
+  - [x] 3.8 Implement ICloudWatchMetricsService interface (12 metric methods)
+  - [x] 3.9 Implement ICorrelationIdService interface (GetOrCreateCorrelationId, SetCorrelationId returning IDisposable)
 
-- [ ] 3A. Implement MediatR Commands, Handlers, and Pipeline Behaviors
-  - [ ] 3A.1 Implement ExecutePostCommand (IRequest<PostBatchResult>: JobId, ClientType, TriggerType, ItemIds, UserId, Mode?)
-  - [ ] 3A.2 Implement ExecuteFeedCommand (IRequest<FeedResult>: JobId, ClientType, TriggerType, Mode?)
-  - [ ] 3A.3 Implement ExecutePostHandler (IRequestHandler<ExecutePostCommand, PostBatchResult> — delegates to AutoPostOrchestrator)
-  - [ ] 3A.4 Implement ExecuteFeedHandler (IRequestHandler<ExecuteFeedCommand, FeedResult> — delegates to AutoPostOrchestrator)
-  - [ ] 3A.5 Implement LoggingBehavior<TRequest, TResponse> (IPipelineBehavior — logs command start/end with CorrelationId from ICorrelationIdService)
-  - [ ] 3A.6 Implement ValidationBehavior<TRequest, TResponse> (IPipelineBehavior — runs IValidator<TRequest> via FluentValidation, throws ValidationException on failure)
-  - [ ] 3A.7 Register MediatR in ServiceCollectionExtensions: services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...))
-  - [ ] 3A.8 Register pipeline behaviors: services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>)) and ValidationBehavior
-  - [ ] 3A.9 Write unit tests for ExecutePostHandler (command dispatched, orchestrator called, result returned)
-  - [ ] 3A.10 Write unit tests for LoggingBehavior (log entries written before and after handler)
-  - [ ] 3A.11 Write unit tests for ValidationBehavior (valid command passes through, invalid command throws ValidationException)
+- [x] 3A. Implement MediatR Commands, Handlers, and Pipeline Behaviors
+  - [x] 3A.1 Implement ExecutePostCommand (IRequest<PostBatchResult>: JobId, ClientType, TriggerType, ItemIds, UserId, Mode?)
+  - [x] 3A.2 Implement ExecuteFeedCommand (IRequest<FeedResult>: JobId, ClientType, TriggerType, Mode?)
+  - [x] 3A.3 Implement ExecutePostHandler (IRequestHandler<ExecutePostCommand, PostBatchResult> — delegates to AutoPostOrchestrator)
+  - [x] 3A.4 Implement ExecuteFeedHandler (IRequestHandler<ExecuteFeedCommand, FeedResult> — delegates to AutoPostOrchestrator)
+  - [x] 3A.5 Implement LoggingBehavior<TRequest, TResponse> (IPipelineBehavior — logs command start/end with CorrelationId from ICorrelationIdService)
+  - [x] 3A.6 Implement ValidationBehavior<TRequest, TResponse> (IPipelineBehavior — runs IValidator<TRequest> via FluentValidation, throws ValidationException on failure)
+  - [x] 3A.7 Register MediatR in ServiceCollectionExtensions: services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...))
+  - [x] 3A.8 Register pipeline behaviors: services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>)) and ValidationBehavior
+  - [x] 3A.9 Write unit tests for ExecutePostHandler (command dispatched, orchestrator called, result returned)
+  - [x] 3A.10 Write unit tests for LoggingBehavior (log entries written before and after handler)
+  - [x] 3A.11 Write unit tests for ValidationBehavior (valid command passes through, invalid command throws ValidationException)
 
-- [ ] 4. Implement Core Repository Interfaces and Implementations
-  - [ ] 4.1 Define IConfigurationRepository (GetByJobIdAsync, GetBySourceQueueIdAsync, GetEdenredApiUrlConfigAsync, UpdateLastPostTimeAsync, UpdateLastDownloadTimeAsync)
-  - [ ] 4.2 Define IWorkitemRepository (GetWorkitemsAsync with PostInProcess=0 filter, GetWorkitemsByItemIdsAsync)
-  - [ ] 4.3 Define IRoutingRepository (RouteWorkitemAsync, SetPostInProcessAsync, ClearPostInProcessAsync, ExecuteSpAsync)
-  - [ ] 4.4 Define IAuditRepository (AddGeneralLogAsync, SavePostHistoryAsync, SaveExecutionHistoryAsync, GetExecutionHistoryAsync)
-  - [ ] 4.5 Define IScheduleRepository (GetSchedulesAsync)
-  - [ ] 4.6 Implement ConfigurationRepository using SqlHelper
-  - [ ] 4.7 Implement WorkitemRepository using SqlHelper (query includes AND ISNULL(h.PostInProcess,0)=0)
-  - [ ] 4.8 Implement RoutingRepository using SqlHelper (WORKITEM_ROUTE SP, direct SQL UPDATE)
-  - [ ] 4.9 Implement AuditRepository using SqlHelper (GENERALLOG_INSERT SP, generic_post_history INSERT, generic_execution_history INSERT)
-  - [ ] 4.10 Implement ScheduleRepository using SqlHelper (GetExecutionSchedule SP with @file_creation_config_id + @job_id)
+- [x] 4. Implement Core Repository Interfaces and Implementations
+  - [x] 4.1 Define IConfigurationRepository (GetByJobIdAsync, GetBySourceQueueIdAsync, GetEdenredApiUrlConfigAsync, UpdateLastPostTimeAsync, UpdateLastDownloadTimeAsync)
+  - [x] 4.2 Define IWorkitemRepository (GetWorkitemsAsync with PostInProcess=0 filter, GetWorkitemsByItemIdsAsync)
+  - [x] 4.3 Define IRoutingRepository (RouteWorkitemAsync, SetPostInProcessAsync, ClearPostInProcessAsync, ExecuteSpAsync)
+  - [x] 4.4 Define IAuditRepository (AddGeneralLogAsync, SavePostHistoryAsync, SaveExecutionHistoryAsync, GetExecutionHistoryAsync)
+  - [x] 4.5 Define IScheduleRepository (GetSchedulesAsync)
+  - [x] 4.6 Implement ConfigurationRepository using SqlHelper
+  - [x] 4.7 Implement WorkitemRepository using SqlHelper (query includes AND ISNULL(h.PostInProcess,0)=0)
+  - [x] 4.8 Implement RoutingRepository using SqlHelper (WORKITEM_ROUTE SP, direct SQL UPDATE)
+  - [x] 4.9 Implement AuditRepository using SqlHelper (GENERALLOG_INSERT SP, generic_post_history INSERT, generic_execution_history INSERT)
+  - [x] 4.10 Implement ScheduleRepository using SqlHelper (GetExecutionSchedule SP with @file_creation_config_id + @job_id)
 
-- [ ] 5. Implement Core Services
-  - [ ] 5.1 Implement SecretsManagerConfigurationProvider in Infrastructure/ folder (scan `ConnectionStrings`, `Email:SmtpPassword`, `ApiKey:Value` for "/" prefixed values; fetch from Secrets Manager in parallel with 30s timeout; handle JSON secrets with `AppConnectionString` key; inject into IConfiguration via AddInMemoryCollection — called via `await builder.Configuration.AddSecretsManagerAsync()` in Program.cs)
-  - [ ] 5.2 Implement CorrelationIdService (AsyncLocal<string> storage, SetCorrelationId returns IDisposable that calls LogContext.PushProperty("CorrelationId", id))
-  - [ ] 5.3 Implement ICloudWatchMetricsService interface (12 methods: PostStarted, PostCompleted, PostFailed, PostSuccessCount, PostFailedCount, PostDurationSeconds, FeedStarted, FeedCompleted, FeedRecordsDownloaded, FeedDurationSeconds, ImageRetryAttempted, ImageRetrySucceeded)
-  - [ ] 5.4 Implement CloudWatchMetricsService (PutMetricDataAsync to namespace IPS/AutoPost/{env}, dimensioned by ClientType + JobId)
-  - [ ] 5.5 Implement ConfigurationService (Secrets Manager GetSecretAsync with in-memory cache, fallback to appsettings)
-  - [ ] 5.6 Implement S3ImageService (GetBase64ImageAsync wrapping S3Utility, UploadFileAsync)
-  - [ ] 5.7 Implement SchedulerService (IsExecuteFileCreation: LastPostTime > 30 min ago AND current time within 30-min window of scheduled time)
-  - [ ] 5.8 Implement EmailService (SMTP send with To/CC/BCC arrays, HTML body, optional attachment)
-  - [ ] 5.9 Write unit tests for CorrelationIdService (AsyncLocal isolation between concurrent tasks, LogContext property set)
-  - [ ] 5.10 Write unit tests for CloudWatchMetricsService (correct namespace, correct dimensions)
+- [x] 5. Implement Core Services
+  - [x] 5.1 Implement SecretsManagerConfigurationProvider in Infrastructure/ folder (scan `ConnectionStrings`, `Email:SmtpPassword`, `ApiKey:Value` for "/" prefixed values; fetch from Secrets Manager in parallel with 30s timeout; handle JSON secrets with `AppConnectionString` key; inject into IConfiguration via AddInMemoryCollection — called via `await builder.Configuration.AddSecretsManagerAsync()` in Program.cs)
+  - [x] 5.2 Implement CorrelationIdService (AsyncLocal<string> storage, SetCorrelationId returns IDisposable that calls LogContext.PushProperty("CorrelationId", id))
+  - [x] 5.3 Implement ICloudWatchMetricsService interface (12 methods: PostStarted, PostCompleted, PostFailed, PostSuccessCount, PostFailedCount, PostDurationSeconds, FeedStarted, FeedCompleted, FeedRecordsDownloaded, FeedDurationSeconds, ImageRetryAttempted, ImageRetrySucceeded)
+  - [x] 5.4 Implement CloudWatchMetricsService (PutMetricDataAsync to namespace IPS/AutoPost/{env}, dimensioned by ClientType + JobId)
+  - [x] 5.5 Implement ConfigurationService (Secrets Manager GetSecretAsync with in-memory cache, fallback to appsettings)
+  - [x] 5.6 Implement S3ImageService (GetBase64ImageAsync wrapping S3Utility, UploadFileAsync)
+  - [x] 5.7 Implement SchedulerService (IsExecuteFileCreation: LastPostTime > 30 min ago AND current time within 30-min window of scheduled time)
+  - [x] 5.8 Implement EmailService (SMTP send with To/CC/BCC arrays, HTML body, optional attachment)
+  - [x] 5.9 Write unit tests for CorrelationIdService (AsyncLocal isolation between concurrent tasks, LogContext property set)
+  - [x] 5.10 Write unit tests for CloudWatchMetricsService (correct namespace, correct dimensions)
 
-- [ ] 6. Implement AutoPostOrchestrator
-  - [ ] 6.1 Implement RunScheduledPostAsync (load config, check schedule, OnBeforePostAsync, fetch workitems, ExecutePostAsync, UpdateLastPostTime, write execution history)
-  - [ ] 6.2 Implement RunManualPostAsync (GetWorkitemsByItemIds, resolve config by StatusId, OnBeforePostAsync, ExecutePostAsync)
-  - [ ] 6.3 Implement RunScheduledFeedAsync (load config, check DownloadFeed flag, ExecuteFeedDownloadAsync, UpdateLastDownloadTime)
-  - [ ] 6.4 Implement ExecutePostBatchAsync (shared by scheduled + manual: set PostInProcess=1, call plugin, ClearPostInProcessAsync in finally, write execution history)
-  - [ ] 6.5 Write unit tests for RunScheduledPostAsync (schedule window check, AllowAutoPost=false skip, no workitems path)
-  - [ ] 6.6 Write unit tests for RunManualPostAsync (StatusId resolution, Missing Configuration response)
-  - [ ] 6.7 Write unit tests for SchedulerService.IsExecuteFileCreation (boundary conditions: exactly at window, before window, after window)
+- [x] 6. Implement AutoPostOrchestrator
+  - [x] 6.1 Implement RunScheduledPostAsync (load config, check schedule, OnBeforePostAsync, fetch workitems, ExecutePostAsync, UpdateLastPostTime, write execution history)
+  - [x] 6.2 Implement RunManualPostAsync (GetWorkitemsByItemIds, resolve config by StatusId, OnBeforePostAsync, ExecutePostAsync)
+  - [x] 6.3 Implement RunScheduledFeedAsync (load config, check DownloadFeed flag, ExecuteFeedDownloadAsync, UpdateLastDownloadTime)
+  - [x] 6.4 Implement ExecutePostBatchAsync (shared by scheduled + manual: set PostInProcess=1, call plugin, ClearPostInProcessAsync in finally, write execution history)
+  - [x] 6.5 Write unit tests for RunScheduledPostAsync (schedule window check, AllowAutoPost=false skip, no workitems path)
+  - [x] 6.6 Write unit tests for RunManualPostAsync (StatusId resolution, Missing Configuration response)
+  - [x] 6.7 Write unit tests for SchedulerService.IsExecuteFileCreation (boundary conditions: exactly at window, before window, after window)
 
 
 ## Phase 2: Database Migration — EF Core + Seed Scripts
