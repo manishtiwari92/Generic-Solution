@@ -227,10 +227,10 @@
 
 ## Phase 6: Scheduler Lambda
 
-- [ ] 21. Implement Scheduler Lambda
-  - [ ] 21.1 Implement SchedulerSyncService (read all active rows from generic_execution_schedule JOIN generic_job_configuration; for each row: create EventBridge rule if not exists, update if cron changed, disable if is_active=0; target ips-feed-queue for DOWNLOAD, ips-post-queue for POST)
-  - [ ] 21.2 Implement Lambda Function.cs handler (triggered by rate(10 minutes) EventBridge rule, calls SchedulerSyncService)
-  - [ ] 21.3 Write unit tests for SchedulerSyncService (new rule created, existing rule updated, inactive rule disabled)
+- [x] 21. Implement Scheduler Lambda
+  - [x] 21.1 Implement SchedulerSyncService (read all active rows from generic_execution_schedule JOIN generic_job_configuration; for each row: create EventBridge rule if not exists, update if cron changed, disable if is_active=0; target ips-feed-queue for DOWNLOAD, ips-post-queue for POST)
+  - [x] 21.2 Implement Lambda Function.cs handler (triggered by rate(10 minutes) EventBridge rule, calls SchedulerSyncService)
+  - [x] 21.3 Write unit tests for SchedulerSyncService (new rule created, existing rule updated, inactive rule disabled)
 
 ---
 

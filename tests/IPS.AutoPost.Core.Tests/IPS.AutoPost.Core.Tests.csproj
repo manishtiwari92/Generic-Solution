@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\IPS.AutoPost.Host.FeedWorker\IPS.AutoPost.Host.FeedWorker.csproj" />
     <ProjectReference Include="..\..\src\IPS.AutoPost.Host.PostWorker\IPS.AutoPost.Host.PostWorker.csproj" />
     <ProjectReference Include="..\..\src\IPS.AutoPost.Api\IPS.AutoPost.Api.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Scheduler\IPS.AutoPost.Scheduler.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -39,6 +40,9 @@
 
     <!-- ASP.NET Core integration testing -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+
+    <!-- AWS SDK — needed for Scheduler tests -->
+    <PackageReference Include="AWSSDK.Scheduler" />
 
     <!-- Code Coverage -->
     <PackageReference Include="coverlet.collector">
