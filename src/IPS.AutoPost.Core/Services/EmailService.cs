@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using IPS.AutoPost.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace IPS.AutoPost.Core.Services;
@@ -8,7 +9,7 @@ namespace IPS.AutoPost.Core.Services;
 /// Sends HTML emails via SMTP using <see cref="System.Net.Mail.SmtpClient"/>.
 /// Supports optional file attachments, CC/BCC recipients, and SMTP authentication.
 /// </summary>
-public sealed class EmailService
+public class EmailService : IEmailService
 {
     private readonly ILogger<EmailService> _logger;
 

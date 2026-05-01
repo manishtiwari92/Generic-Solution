@@ -106,59 +106,59 @@
 
 ## Phase 3: InvitedClub Plugin
 
-- [ ] 9. Create InvitedClub models and constants
-  - [ ] 9.1 Create InvitedClubConfig.cs (ImagePostRetryLimit, EdenredFailQueueId, InvitedFailQueueId, FeedDownloadTime, LastSupplierDownloadTime)
-  - [ ] 9.2 Create InvoiceRequest.cs (InvoiceRequest, InvoiceLine, InvoiceDistribution, InvoiceDff)
-  - [ ] 9.3 Create AttachmentRequest.cs
-  - [ ] 9.4 Create InvoiceCalculateTaxRequest.cs
-  - [ ] 9.5 Create InvoiceResponse.cs (InvoiceResponse, AttachmentResponse, InvoiceCalculateTaxResponse)
-  - [ ] 9.6 Create SupplierResponse.cs (SupplierResponse, SupplierData with HasMore/Count/Limit/Offset)
-  - [ ] 9.7 Create SupplierAddressResponse.cs (SupplierAddressResponse, SupplierAddressData)
-  - [ ] 9.8 Create SupplierSiteResponse.cs (SupplierSiteResponse, SupplierSiteData)
-  - [ ] 9.9 Create COAResponse.cs (COAResponse with JsonProperty attributes for _CODE_COMBINATION_ID etc., COAData)
-  - [ ] 9.10 Create FailedImagesData.cs (InvoiceId, ItemId, ImagePostRetryCount, ImagePath)
-  - [ ] 9.11 Create PostHistory.cs (InvitedClub-specific: ItemId, InvoiceRequestJson, InvoiceResponseJson, AttachmentRequestJson, AttachmentResponseJson, CalculateTaxRequestJson, CalculateTaxResponseJson, ManuallyPosted, PostedBy)
-  - [ ] 9.12 Create EmailConfig.cs (SMTPServer, SMTPServerPort, Username, Password, EmailFrom, EmailFromUser, SMTPUseSSL, EmailTo, EmailCC, EmailBCC, EmailToArr, EmailCCArr, EmailBCCArr, EmailSubject, EmailTemplate, EmailToHelpDesk, EmailSubjectImageFail, EmailTemplateImageFail)
-  - [ ] 9.13 Create APIResponseType.cs (ResponseType, ResponseCode, ResponseMessage)
-  - [ ] 9.14 Create InvitedClubConstants.cs (all SP names, API URIs, Content-Types, table names, log strings)
+- [x] 9. Create InvitedClub models and constants
+  - [x] 9.1 Create InvitedClubConfig.cs (ImagePostRetryLimit, EdenredFailQueueId, InvitedFailQueueId, FeedDownloadTime, LastSupplierDownloadTime)
+  - [x] 9.2 Create InvoiceRequest.cs (InvoiceRequest, InvoiceLine, InvoiceDistribution, InvoiceDff)
+  - [x] 9.3 Create AttachmentRequest.cs
+  - [x] 9.4 Create InvoiceCalculateTaxRequest.cs
+  - [x] 9.5 Create InvoiceResponse.cs (InvoiceResponse, AttachmentResponse, InvoiceCalculateTaxResponse)
+  - [x] 9.6 Create SupplierResponse.cs (SupplierResponse, SupplierData with HasMore/Count/Limit/Offset)
+  - [x] 9.7 Create SupplierAddressResponse.cs (SupplierAddressResponse, SupplierAddressData)
+  - [x] 9.8 Create SupplierSiteResponse.cs (SupplierSiteResponse, SupplierSiteData)
+  - [x] 9.9 Create COAResponse.cs (COAResponse with JsonProperty attributes for _CODE_COMBINATION_ID etc., COAData)
+  - [x] 9.10 Create FailedImagesData.cs (InvoiceId, ItemId, ImagePostRetryCount, ImagePath)
+  - [x] 9.11 Create PostHistory.cs (InvitedClub-specific: ItemId, InvoiceRequestJson, InvoiceResponseJson, AttachmentRequestJson, AttachmentResponseJson, CalculateTaxRequestJson, CalculateTaxResponseJson, ManuallyPosted, PostedBy)
+  - [x] 9.12 Create EmailConfig.cs (SMTPServer, SMTPServerPort, Username, Password, EmailFrom, EmailFromUser, SMTPUseSSL, EmailTo, EmailCC, EmailBCC, EmailToArr, EmailCCArr, EmailBCCArr, EmailSubject, EmailTemplate, EmailToHelpDesk, EmailSubjectImageFail, EmailTemplateImageFail)
+  - [x] 9.13 Create APIResponseType.cs (ResponseType, ResponseCode, ResponseMessage)
+  - [x] 9.14 Create InvitedClubConstants.cs (all SP names, API URIs, Content-Types, table names, log strings)
 
-- [ ] 10. Implement InvitedClubFeedStrategy
-  - [ ] 10.1 Implement LoadSupplierAsync (paginated GET, Basic Auth, Timeout=-1, all suppliers including inactive)
-  - [ ] 10.2 Implement IsInitialCallAsync (SELECT COUNT(*) FROM {tableName})
-  - [ ] 10.3 Implement LoadSupplierAddressAsync (per-supplier paginated GET, inject SupplierId into each item after deserialization, initial vs incremental logic using LastSupplierDownloadTime-2days)
-  - [ ] 10.4 Implement LoadSupplierSiteAsync (same pattern as address, call InvitedClub_UpdateSupplierSiteInSupplierAddress SP after insert)
-  - [ ] 10.5 Implement BulkInsertAsync (truncate-then-insert for full refresh; DELETE WHERE SupplierId IN (...) then insert for incremental)
-  - [ ] 10.6 Implement LoadCOAAsync (paginated GET, truncate-then-insert, write pipe-delimited CSV, check missing CodeCombinationIds vs InvitedClubsCOAFullFeed, send email if missing)
-  - [ ] 10.7 Implement ExportSupplierCsvAsync (call InvitedClub_GetSupplierDataToExport SP, write pipe-delimited CSV to FeedDownloadPath\Supplier\Supplier_{timestamp}.csv; after success call UpdateSupplierLastDownloadTime(@configurations_id) SP to update last_supplier_download_time in post_to_invitedclub_configuration)
-  - [ ] 10.8 Implement ExecuteAsync (orchestrate all feed steps, update last_supplier_download_time after supplier steps, return FeedResult)
-  - [ ] 10.9 Write unit tests for LoadSupplierAddressAsync (initial call uses all IDs, incremental uses filtered IDs, SupplierId injection)
-  - [ ] 10.10 Write unit tests for LoadCOAAsync (missing COA detection, email trigger condition)
+- [x] 10. Implement InvitedClubFeedStrategy
+  - [x] 10.1 Implement LoadSupplierAsync (paginated GET, Basic Auth, Timeout=-1, all suppliers including inactive)
+  - [x] 10.2 Implement IsInitialCallAsync (SELECT COUNT(*) FROM {tableName})
+  - [x] 10.3 Implement LoadSupplierAddressAsync (per-supplier paginated GET, inject SupplierId into each item after deserialization, initial vs incremental logic using LastSupplierDownloadTime-2days)
+  - [x] 10.4 Implement LoadSupplierSiteAsync (same pattern as address, call InvitedClub_UpdateSupplierSiteInSupplierAddress SP after insert)
+  - [x] 10.5 Implement BulkInsertAsync (truncate-then-insert for full refresh; DELETE WHERE SupplierId IN (...) then insert for incremental)
+  - [x] 10.6 Implement LoadCOAAsync (paginated GET, truncate-then-insert, write pipe-delimited CSV, check missing CodeCombinationIds vs InvitedClubsCOAFullFeed, send email if missing)
+  - [x] 10.7 Implement ExportSupplierCsvAsync (call InvitedClub_GetSupplierDataToExport SP, write pipe-delimited CSV to FeedDownloadPath\Supplier\Supplier_{timestamp}.csv; after success call UpdateSupplierLastDownloadTime(@configurations_id) SP to update last_supplier_download_time in post_to_invitedclub_configuration)
+  - [x] 10.8 Implement ExecuteAsync (orchestrate all feed steps, update last_supplier_download_time after supplier steps, return FeedResult)
+  - [x] 10.9 Write unit tests for LoadSupplierAddressAsync (initial call uses all IDs, incremental uses filtered IDs, SupplierId injection)
+  - [x] 10.10 Write unit tests for LoadCOAAsync (missing COA detection, email trigger condition)
 
-- [ ] 11. Implement InvitedClubRetryService
-  - [ ] 11.1 Implement RetryPostImagesAsync (call InvitedClub_GetFailedImagesData SP with @HeaderTable, @ImagePostRetryLimit, @InvitedFailPostQueueId)
-  - [ ] 11.2 Implement RetryOneImageAsync (get image from S3 or local, POST attachment with Content-Type: application/vnd.oracle.adf.resourceitem+json, on HTTP 201 update AttachedDocumentId + route to SuccessQueueId, always increment ImagePostRetryCount, always use config.DefaultUserId, always use "Automatic Route:")
-  - [ ] 11.3 Write unit tests for RetryPostImagesAsync (no records path, success path, failure path, retry count increment)
+- [x] 11. Implement InvitedClubRetryService
+  - [x] 11.1 Implement RetryPostImagesAsync (call InvitedClub_GetFailedImagesData SP with @HeaderTable, @ImagePostRetryLimit, @InvitedFailPostQueueId)
+  - [x] 11.2 Implement RetryOneImageAsync (get image from S3 or local, POST attachment with Content-Type: application/vnd.oracle.adf.resourceitem+json, on HTTP 201 update AttachedDocumentId + route to SuccessQueueId, always increment ImagePostRetryCount, always use config.DefaultUserId, always use "Automatic Route:")
+  - [x] 11.3 Write unit tests for RetryPostImagesAsync (no records path, success path, failure path, retry count increment)
 
-- [ ] 12. Implement InvitedClubPostStrategy
-  - [ ] 12.1 Implement GetImageAsync (S3 path for non-legacy, local file for legacy, return base64+fileName+failed flag)
-  - [ ] 12.2 Implement BuildInvoiceRequestJson (map header+detail DataSet to InvoiceRequest, apply UseTax=NO logic to strip ShipToLocation using JObject manipulation)
-  - [ ] 12.3 Implement PostInvoiceAsync (POST to PostServiceURL, Content-Type: application/json, Basic Auth, Timeout=-1, expect HTTP 201, extract InvoiceId from response JSON; on non-201: call UpdateGLDateValue to set GlDate=NULL on WFInvitedClubsIndexHeader, route to InvitedFailPostQueueId)
-  - [ ] 12.4 Implement PostInvoiceAttachmentAsync (POST to {PostServiceURL}/{invoiceId}/child/attachments, Content-Type: application/vnd.oracle.adf.resourceitem+json, Basic Auth, Timeout=-1, expect HTTP 201, extract AttachedDocumentId)
-  - [ ] 12.5 Implement PostCalculateTaxAsync (POST to {PostServiceURL}/action/calculateTax, Content-Type: application/vnd.oracle.adf.action+json, Basic Auth, Timeout=-1, use AddJsonBody not AddParameter, expect HTTP 200)
-  - [ ] 12.6 Implement SaveHistoryAsync (INSERT into post_to_invitedclub_history — only called when at least one API call was attempted, NOT for image-not-found or RequesterId-empty early exits)
-  - [ ] 12.7 Implement ExecuteAsync main loop (for each workitem: set PostInProcess=1, get image from S3 (non-legacy) or local path {image_parent_path}{ImagePath} (legacy) using DownloadServiceURL for feed and PostServiceURL for post, validate RequesterId, build payload, PostInvoice, PostAttachment, PostCalculateTax if UseTax=YES, route to success/fail queue, write history to WFInvitedClubsIndexHeader + post_to_invitedclub_history, clear PostInProcess in finally; call GENERALLOG_INSERT with operationType="Post To InvitedClubs" and sourceObject="Contents" on both success and failure paths; after loop: send image failure email if any failed)
-  - [ ] 12.8 Implement image failure email (to emailConfig.EmailToHelpDesk split by ';', use emailConfig.EmailTemplateImageFail as HTML template, replace #MissingImagesTable# placeholder with GenerateHtmlTable() output, use emailConfig.EmailSubjectImageFail as subject; send ONLY when EmailTemplateImageFail is not null/whitespace AND EmailToHelpDesk has non-zero length)
-  - [ ] 12.9 Write unit tests for BuildInvoiceRequestJson (UseTax=YES keeps ShipToLocation, UseTax=NO removes ShipToLocation from all lines)
-  - [ ] 12.10 Write unit tests for ExecuteAsync (image not found -> EdenredFailPostQueueId, no API call; RequesterId empty -> InvitedFailPostQueueId, no API call; invoice POST fail -> clear GLDate, route to InvitedFailPostQueueId; attachment fail -> route to EdenredFailPostQueueId; calculateTax fail -> route to InvitedFailPostQueueId; full success -> route to SuccessQueueId)
-  - [ ] 12.11 Write unit tests for PostInProcess flag (set before API call, cleared in finally even on exception)
+- [x] 12. Implement InvitedClubPostStrategy
+  - [x] 12.1 Implement GetImageAsync (S3 path for non-legacy, local file for legacy, return base64+fileName+failed flag)
+  - [x] 12.2 Implement BuildInvoiceRequestJson (map header+detail DataSet to InvoiceRequest, apply UseTax=NO logic to strip ShipToLocation using JObject manipulation)
+  - [x] 12.3 Implement PostInvoiceAsync (POST to PostServiceURL, Content-Type: application/json, Basic Auth, Timeout=-1, expect HTTP 201, extract InvoiceId from response JSON; on non-201: call UpdateGLDateValue to set GlDate=NULL on WFInvitedClubsIndexHeader, route to InvitedFailPostQueueId)
+  - [x] 12.4 Implement PostInvoiceAttachmentAsync (POST to {PostServiceURL}/{invoiceId}/child/attachments, Content-Type: application/vnd.oracle.adf.resourceitem+json, Basic Auth, Timeout=-1, expect HTTP 201, extract AttachedDocumentId)
+  - [x] 12.5 Implement PostCalculateTaxAsync (POST to {PostServiceURL}/action/calculateTax, Content-Type: application/vnd.oracle.adf.action+json, Basic Auth, Timeout=-1, use AddJsonBody not AddParameter, expect HTTP 200)
+  - [x] 12.6 Implement SaveHistoryAsync (INSERT into post_to_invitedclub_history — only called when at least one API call was attempted, NOT for image-not-found or RequesterId-empty early exits)
+  - [x] 12.7 Implement ExecuteAsync main loop (for each workitem: set PostInProcess=1, get image from S3 (non-legacy) or local path {image_parent_path}{ImagePath} (legacy) using DownloadServiceURL for feed and PostServiceURL for post, validate RequesterId, build payload, PostInvoice, PostAttachment, PostCalculateTax if UseTax=YES, route to success/fail queue, write history to WFInvitedClubsIndexHeader + post_to_invitedclub_history, clear PostInProcess in finally; call GENERALLOG_INSERT with operationType="Post To InvitedClubs" and sourceObject="Contents" on both success and failure paths; after loop: send image failure email if any failed)
+  - [x] 12.8 Implement image failure email (to emailConfig.EmailToHelpDesk split by ';', use emailConfig.EmailTemplateImageFail as HTML template, replace #MissingImagesTable# placeholder with GenerateHtmlTable() output, use emailConfig.EmailSubjectImageFail as subject; send ONLY when EmailTemplateImageFail is not null/whitespace AND EmailToHelpDesk has non-zero length)
+  - [x] 12.9 Write unit tests for BuildInvoiceRequestJson (UseTax=YES keeps ShipToLocation, UseTax=NO removes ShipToLocation from all lines)
+  - [x] 12.10 Write unit tests for ExecuteAsync (image not found -> EdenredFailPostQueueId, no API call; RequesterId empty -> InvitedFailPostQueueId, no API call; invoice POST fail -> clear GLDate, route to InvitedFailPostQueueId; attachment fail -> route to EdenredFailPostQueueId; calculateTax fail -> route to InvitedFailPostQueueId; full success -> route to SuccessQueueId)
+  - [x] 12.11 Write unit tests for PostInProcess flag (set before API call, cleared in finally even on exception)
 
-- [ ] 13. Implement InvitedClubPlugin and register
-  - [ ] 13.1 Implement InvitedClubPlugin.OnBeforePostAsync (calls RetryService.RetryPostImagesAsync)
-  - [ ] 13.2 Implement InvitedClubPlugin.ExecutePostAsync (delegates to PostStrategy)
-  - [ ] 13.3 Implement InvitedClubPlugin.ExecuteFeedDownloadAsync (delegates to FeedStrategy)
-  - [ ] 13.4 Register InvitedClubPlugin in PluginRegistration.cs
-  - [ ] 13.5 Write integration test: full InvitedClub scheduled post flow (mock Oracle Fusion API, real test DB, verify routing + history + PostInProcess cleared)
-  - [ ] 13.6 Write integration test: full InvitedClub feed download flow (mock Oracle Fusion API, verify supplier/address/site/COA tables populated)
+- [x] 13. Implement InvitedClubPlugin and register
+  - [x] 13.1 Implement InvitedClubPlugin.OnBeforePostAsync (calls RetryService.RetryPostImagesAsync)
+  - [x] 13.2 Implement InvitedClubPlugin.ExecutePostAsync (delegates to PostStrategy)
+  - [x] 13.3 Implement InvitedClubPlugin.ExecuteFeedDownloadAsync (delegates to FeedStrategy)
+  - [x] 13.4 Register InvitedClubPlugin in PluginRegistration.cs
+  - [x] 13.5 Write integration test: full InvitedClub scheduled post flow (mock Oracle Fusion API, real test DB, verify routing + history + PostInProcess cleared)
+  - [x] 13.6 Write integration test: full InvitedClub feed download flow (mock Oracle Fusion API, verify supplier/address/site/COA tables populated)
 
 ---
 
