@@ -206,22 +206,22 @@
 
 ## Phase 5: Host Workers and API
 
-- [ ] 18. Implement FeedWorker
-  - [ ] 18.1 Implement FeedWorker.cs BackgroundService (SQS long polling 20s, MaxNumberOfMessages=10, create new DI scope per message, deserialize SqsMessagePayload, send ExecuteFeedCommand via IMediator, delete message on success, log error and do NOT delete on failure)
-  - [ ] 18.2 Implement Program.cs for FeedWorker (DI: call AddSecretsManagerAsync() first, then register SqlHelper, all repositories, ConfigurationService, S3ImageService, EmailService, all plugins, PluginRegistry, AutoPostOrchestrator, IMediator, ICorrelationIdService, ICloudWatchMetricsService, IAmazonSQS, SQS_QUEUE_URL from env var)
-  - [ ] 18.3 Write unit test for FeedWorker (message processed -> deleted; exception -> not deleted; new scope created per message)
+- [x] 18. Implement FeedWorker
+  - [x] 18.1 Implement FeedWorker.cs BackgroundService (SQS long polling 20s, MaxNumberOfMessages=10, create new DI scope per message, deserialize SqsMessagePayload, send ExecuteFeedCommand via IMediator, delete message on success, log error and do NOT delete on failure)
+  - [x] 18.2 Implement Program.cs for FeedWorker (DI: call AddSecretsManagerAsync() first, then register SqlHelper, all repositories, ConfigurationService, S3ImageService, EmailService, all plugins, PluginRegistry, AutoPostOrchestrator, IMediator, ICorrelationIdService, ICloudWatchMetricsService, IAmazonSQS, SQS_QUEUE_URL from env var)
+  - [x] 18.3 Write unit test for FeedWorker (message processed -> deleted; exception -> not deleted; new scope created per message)
 
-- [ ] 19. Implement PostWorker
-  - [ ] 19.1 Implement PostWorker.cs BackgroundService (same pattern as FeedWorker but polls ips-post-queue, sends ExecutePostCommand via IMediator, MaxNumberOfMessages=10, scoped DI per message)
-  - [ ] 19.2 Implement Program.cs for PostWorker (same DI wiring as FeedWorker)
-  - [ ] 19.3 Write unit test for PostWorker (message processed -> deleted; exception -> not deleted; Mode field passed through to command)
+- [x] 19. Implement PostWorker
+  - [x] 19.1 Implement PostWorker.cs BackgroundService (same pattern as FeedWorker but polls ips-post-queue, sends ExecutePostCommand via IMediator, MaxNumberOfMessages=10, scoped DI per message)
+  - [x] 19.2 Implement Program.cs for PostWorker (same DI wiring as FeedWorker)
+  - [x] 19.3 Write unit test for PostWorker (message processed -> deleted; exception -> not deleted; Mode field passed through to command)
 
-- [ ] 20. Implement API project
-  - [ ] 20.1 Implement PostController (POST /api/post/{jobId}/items/{itemIds} and POST /api/post/{jobId} — both call orchestrator.RunManualPostAsync directly, return PostBatchResult as JSON)
-  - [ ] 20.2 Implement FeedController (POST /api/feed/{jobId} — calls orchestrator.RunScheduledFeedAsync directly)
-  - [ ] 20.3 Implement StatusController (GET /api/status/{executionId} — reads generic_execution_history)
-  - [ ] 20.4 Implement Program.cs for Api (DI wiring, API key authentication middleware using x-api-key header)
-  - [ ] 20.5 Write integration tests for PostController (manual post with itemIds, missing configuration response, successful post response shape)
+- [x] 20. Implement API project
+  - [x] 20.1 Implement PostController (POST /api/post/{jobId}/items/{itemIds} and POST /api/post/{jobId} — both call orchestrator.RunManualPostAsync directly, return PostBatchResult as JSON)
+  - [x] 20.2 Implement FeedController (POST /api/feed/{jobId} — calls orchestrator.RunScheduledFeedAsync directly)
+  - [x] 20.3 Implement StatusController (GET /api/status/{executionId} — reads generic_execution_history)
+  - [x] 20.4 Implement Program.cs for Api (DI wiring, API key authentication middleware using x-api-key header)
+  - [x] 20.5 Write integration tests for PostController (manual post with itemIds, missing configuration response, successful post response shape)
 
 ---
 

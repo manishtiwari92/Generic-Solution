@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Host.FeedWorker\IPS.AutoPost.Host.FeedWorker.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Host.PostWorker\IPS.AutoPost.Host.PostWorker.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Api\IPS.AutoPost.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,7 +36,10 @@
     
     <!-- EF Core InMemory -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
-    
+
+    <!-- ASP.NET Core integration testing -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+
     <!-- Code Coverage -->
     <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>

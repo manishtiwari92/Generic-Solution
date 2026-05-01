@@ -7,6 +7,11 @@
     <UserSecretsId>ips-autopost-api</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Expose Program class to the test project for WebApplicationFactory -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IPS.AutoPost.Core.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
     <ProjectReference Include="..\IPS.AutoPost.Plugins\IPS.AutoPost.Plugins.csproj" />
@@ -14,7 +19,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
-    <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="Serilog.AspNetCore" />
   </ItemGroup>
 
