@@ -164,43 +164,43 @@
 
 ## Phase 4: Sevita Plugin
 
-- [ ] 14. Create Sevita models and constants
-  - [ ] 14.1 Create SevitaConfig.cs (IsPORecord, PostJsonPath, TDriveLocation, NewUiTDriveLocation, RemotePath, ApiAccessTokenUrl, ClientId, ClientSecret, TokenExpirationMin)
-  - [ ] 14.2 Create InvoiceRequest.cs (InvoiceRequest with vendorId/employeeId/payAlone/invoiceRelatedToZycusPurchase/zycusInvoiceNumber/invoiceNumber/invoiceDate/expensePeriod/checkMemo/cerfTrackingNumber/remittanceRequired/edenredInvoiceId, InvoiceLine with alias/amount/naturalAccountNumber/edenredLineItemId, AttachmentRequest with fileName/fileBase/fileUrl/docid)
-  - [ ] 14.3 Create InvoiceResponse.cs (InvoiceResponse with Status/InvoiceId/Result/ErrorMsg, InvoicePostResponse)
-  - [ ] 14.4 Create ValidIds.cs (HashSet<string> VendorIds, HashSet<string> EmployeeIds)
-  - [ ] 14.5 Create PostHistory.cs (Sevita-specific: ItemId, InvoiceRequestJson, InvoiceResponseJson, ManuallyPosted, PostedBy, Comment)
-  - [ ] 14.6 Create PostFailedRecord.cs (SupplierName, ApproverName, InvoiceDate, DocumentId, IsSendNotification, FailureReason)
-  - [ ] 14.7 Create SevitaConstants.cs
+- [x] 14. Create Sevita models and constants
+  - [x] 14.1 Create SevitaConfig.cs (IsPORecord, PostJsonPath, TDriveLocation, NewUiTDriveLocation, RemotePath, ApiAccessTokenUrl, ClientId, ClientSecret, TokenExpirationMin)
+  - [x] 14.2 Create InvoiceRequest.cs (InvoiceRequest with vendorId/employeeId/payAlone/invoiceRelatedToZycusPurchase/zycusInvoiceNumber/invoiceNumber/invoiceDate/expensePeriod/checkMemo/cerfTrackingNumber/remittanceRequired/edenredInvoiceId, InvoiceLine with alias/amount/naturalAccountNumber/edenredLineItemId, AttachmentRequest with fileName/fileBase/fileUrl/docid)
+  - [x] 14.3 Create InvoiceResponse.cs (InvoiceResponse with Status/InvoiceId/Result/ErrorMsg, InvoicePostResponse)
+  - [x] 14.4 Create ValidIds.cs (HashSet<string> VendorIds, HashSet<string> EmployeeIds)
+  - [x] 14.5 Create PostHistory.cs (Sevita-specific: ItemId, InvoiceRequestJson, InvoiceResponseJson, ManuallyPosted, PostedBy, Comment)
+  - [x] 14.6 Create PostFailedRecord.cs (SupplierName, ApproverName, InvoiceDate, DocumentId, IsSendNotification, FailureReason)
+  - [x] 14.7 Create SevitaConstants.cs
 
-- [ ] 15. Implement Sevita services
-  - [ ] 15.1 Implement SevitaTokenService.GetAuthTokenAsync (POST to api_access_token_url with grant_type=client_credentials, client_id, client_secret; Content-Type: application/x-www-form-urlencoded; cache token until TokenExpirationMin elapsed)
-  - [ ] 15.2 Implement SevitaValidationService.ValidateLineSum (SUM(lineItem.amount) == header.InvoiceAmount)
-  - [ ] 15.3 Implement SevitaValidationService.ValidatePO (required fields: vendorId/invoiceDate/invoiceNumber/checkMemo; vendorId in VendorIds; default checkMemo="PO#" if empty)
-  - [ ] 15.4 Implement SevitaValidationService.ValidateNonPO (required fields: vendorId/employeeId/invoiceDate/invoiceNumber/checkMemo/expensePeriod; both IDs in ValidIds; cerfTrackingNumber required if any line naturalAccountNumber="174098")
-  - [ ] 15.5 Implement SevitaValidationService.ValidateAttachments (fileName/fileBase/fileUrl/docid all required)
-  - [ ] 15.6 Write unit tests for SevitaValidationService (PO missing fields, Non-PO missing fields, line sum mismatch, cerfTrackingNumber rule, attachment validation)
-  - [ ] 15.7 Write unit tests for SevitaTokenService (token cached on second call, token refreshed after expiry)
+- [x] 15. Implement Sevita services
+  - [x] 15.1 Implement SevitaTokenService.GetAuthTokenAsync (POST to api_access_token_url with grant_type=client_credentials, client_id, client_secret; Content-Type: application/x-www-form-urlencoded; cache token until TokenExpirationMin elapsed)
+  - [x] 15.2 Implement SevitaValidationService.ValidateLineSum (SUM(lineItem.amount) == header.InvoiceAmount)
+  - [x] 15.3 Implement SevitaValidationService.ValidatePO (required fields: vendorId/invoiceDate/invoiceNumber/checkMemo; vendorId in VendorIds; default checkMemo="PO#" if empty)
+  - [x] 15.4 Implement SevitaValidationService.ValidateNonPO (required fields: vendorId/employeeId/invoiceDate/invoiceNumber/checkMemo/expensePeriod; both IDs in ValidIds; cerfTrackingNumber required if any line naturalAccountNumber="174098")
+  - [x] 15.5 Implement SevitaValidationService.ValidateAttachments (fileName/fileBase/fileUrl/docid all required)
+  - [x] 15.6 Write unit tests for SevitaValidationService (PO missing fields, Non-PO missing fields, line sum mismatch, cerfTrackingNumber rule, attachment validation)
+  - [x] 15.7 Write unit tests for SevitaTokenService (token cached on second call, token refreshed after expiry)
 
-- [ ] 16. Implement SevitaPostStrategy
-  - [ ] 16.1 Implement BuildLineItems (group detail rows by alias+naturalAccountNumber, sum LineAmount per group, format amount to 2 decimal places, edenredLineItemId = edenredInvoiceId + "_" + lineItemCount)
-  - [ ] 16.2 Implement SerializePayload (serialize InvoiceRequest then wrap in JSON array "[{...}]")
-  - [ ] 16.3 Implement UploadAuditJsonAsync (if post_json_path configured: write JSON to temp file, upload to S3 at {post_json_path}/{itemId}_{timestamp}.json, delete temp file)
-  - [ ] 16.4 Implement PostInvoiceAsync (POST to InvoicePostURL, Authorization: Bearer {token}, Timeout=-1; use request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) NOT AddJsonBody; HTTP 201: extract InvoiceId from invoiceIds first property name; HTTP 500: special error message "Internal Server error occurred while posting invoice."; other: extract recordErrors/message/invoiceIds/failedRecords; load api_response_configuration via GetAPIResponseTypes at start of PostData for manual posts)
-  - [ ] 16.5 Implement SaveHistoryAsync (INSERT into sevita_posted_records_history with fileBase=null on all attachments — use JArray to null out fileBase before saving)
-  - [ ] 16.6 Implement SendNotificationEmailAsync (to FailedPostConfiguration.EmailTo split by ';', HTML table from failed records excluding IsSendNotification column, uses GenerateHtmlTable())
-  - [ ] 16.7 Implement ExecuteAsync main loop (for each workitem: get image from S3 always, validate, build payload, upload audit JSON, PostInvoice, route to success/fail, save history, call UpdateSevitaHeaderPostFields SP; after loop: send notification email if any failed)
-  - [ ] 16.8 Write unit tests for BuildLineItems (grouping by alias+naturalAccountNumber, amount summing, edenredLineItemId format)
-  - [ ] 16.9 Write unit tests for SerializePayload (output is valid JSON array, fileBase present in payload)
-  - [ ] 16.10 Write unit tests for SaveHistoryAsync (fileBase is null in stored JSON, other fields preserved)
-  - [ ] 16.11 Write unit tests for ExecuteAsync (image not found -> FailedPostsQueueId + history written; validation fail -> FailedPostsQueueId, no API call; HTTP 201 -> SuccessQueueId; HTTP 500 -> FailedPostsQueueId with special message)
+- [x] 16. Implement SevitaPostStrategy
+  - [x] 16.1 Implement BuildLineItems (group detail rows by alias+naturalAccountNumber, sum LineAmount per group, format amount to 2 decimal places, edenredLineItemId = edenredInvoiceId + "_" + lineItemCount)
+  - [x] 16.2 Implement SerializePayload (serialize InvoiceRequest then wrap in JSON array "[{...}]")
+  - [x] 16.3 Implement UploadAuditJsonAsync (if post_json_path configured: write JSON to temp file, upload to S3 at {post_json_path}/{itemId}_{timestamp}.json, delete temp file)
+  - [x] 16.4 Implement PostInvoiceAsync (POST to InvoicePostURL, Authorization: Bearer {token}, Timeout=-1; use request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) NOT AddJsonBody; HTTP 201: extract InvoiceId from invoiceIds first property name; HTTP 500: special error message "Internal Server error occurred while posting invoice."; other: extract recordErrors/message/invoiceIds/failedRecords; load api_response_configuration via GetAPIResponseTypes at start of PostData for manual posts)
+  - [x] 16.5 Implement SaveHistoryAsync (INSERT into sevita_posted_records_history with fileBase=null on all attachments — use JArray to null out fileBase before saving)
+  - [x] 16.6 Implement SendNotificationEmailAsync (to FailedPostConfiguration.EmailTo split by ';', HTML table from failed records excluding IsSendNotification column, uses GenerateHtmlTable())
+  - [x] 16.7 Implement ExecuteAsync main loop (for each workitem: get image from S3 always, validate, build payload, upload audit JSON, PostInvoice, route to success/fail, save history, call UpdateSevitaHeaderPostFields SP; after loop: send notification email if any failed)
+  - [x] 16.8 Write unit tests for BuildLineItems (grouping by alias+naturalAccountNumber, amount summing, edenredLineItemId format)
+  - [x] 16.9 Write unit tests for SerializePayload (output is valid JSON array, fileBase present in payload)
+  - [x] 16.10 Write unit tests for SaveHistoryAsync (fileBase is null in stored JSON, other fields preserved)
+  - [x] 16.11 Write unit tests for ExecuteAsync (image not found -> FailedPostsQueueId + history written; validation fail -> FailedPostsQueueId, no API call; HTTP 201 -> SuccessQueueId; HTTP 500 -> FailedPostsQueueId with special message)
 
-- [ ] 17. Implement SevitaPlugin and register
-  - [ ] 17.1 Implement SevitaPlugin.OnBeforePostAsync (load ValidIds from Sevita_Supplier_SiteInformation_Feed + Sevita_Employee_Feed)
-  - [ ] 17.2 Implement SevitaPlugin.ExecutePostAsync (delegates to PostStrategy, passes _validIds)
-  - [ ] 17.3 Implement SevitaPlugin.ClearPostInProcessAsync (override: call UpdateSevitaHeaderPostFields(@UID) SP)
-  - [ ] 17.4 Register SevitaPlugin in PluginRegistration.cs
-  - [ ] 17.5 Write integration test: full Sevita scheduled post flow (mock Sevita API + token endpoint, real test DB, verify routing + history with fileBase=null + UpdateSevitaHeaderPostFields called)
+- [x] 17. Implement SevitaPlugin and register
+  - [x] 17.1 Implement SevitaPlugin.OnBeforePostAsync (load ValidIds from Sevita_Supplier_SiteInformation_Feed + Sevita_Employee_Feed)
+  - [x] 17.2 Implement SevitaPlugin.ExecutePostAsync (delegates to PostStrategy, passes _validIds)
+  - [x] 17.3 Implement SevitaPlugin.ClearPostInProcessAsync (override: call UpdateSevitaHeaderPostFields(@UID) SP)
+  - [x] 17.4 Register SevitaPlugin in PluginRegistration.cs
+  - [x] 17.5 Write integration test: full Sevita scheduled post flow (mock Sevita API + token endpoint, real test DB, verify routing + history with fileBase=null + UpdateSevitaHeaderPostFields called)
 
 ---
 

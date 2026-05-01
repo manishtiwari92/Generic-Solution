@@ -1,5 +1,6 @@
 using IPS.AutoPost.Core.Engine;
 using IPS.AutoPost.Plugins.InvitedClub;
+using IPS.AutoPost.Plugins.Sevita;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace IPS.AutoPost.Plugins;
@@ -31,6 +32,7 @@ public static class PluginRegistration
     /// Currently registered plugins:
     /// <list type="bullet">
     ///   <item><c>INVITEDCLUB</c> — <see cref="InvitedClubPlugin"/></item>
+    ///   <item><c>SEVITA</c> — <see cref="SevitaPlugin"/></item>
     /// </list>
     /// </para>
     /// <para>
@@ -58,8 +60,13 @@ public static class PluginRegistration
         registry.Register(serviceProvider.GetRequiredService<InvitedClubPlugin>());
 
         // -----------------------------------------------------------------------
+        // 17.4 Register SevitaPlugin
+        // client_type = "SEVITA"
+        // -----------------------------------------------------------------------
+        registry.Register(serviceProvider.GetRequiredService<SevitaPlugin>());
+
+        // -----------------------------------------------------------------------
         // Future plugins are registered here:
-        // registry.Register(serviceProvider.GetRequiredService<SevitaPlugin>());
         // registry.Register(serviceProvider.GetRequiredService<MediaPlugin>());
         // -----------------------------------------------------------------------
     }
@@ -83,6 +90,31 @@ public static class PluginRegistration
         services.AddScoped<InvitedClubPostStrategy>();
         services.AddScoped<InvitedClubFeedStrategy>();
         services.AddScoped<InvitedClubPlugin>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers all Sevita plugin services into the DI container.
+    /// Call this from Program.cs before building the host.
+    /// </summary>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="connectionString">
+    /// The SQL Server connection string for the Workflow database.
+    /// Resolved by the host from IConfiguration before calling this method.
+    /// </param>
+    public static IServiceCollection AddSevitaPlugin(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        // SqlSevitaPostDataAccess requires the connection string at construction time.
+        services.AddScoped<ISevitaPostDataAccess>(_ =>
+            new SqlSevitaPostDataAccess(connectionString));
+
+        services.AddScoped<SevitaTokenService>();
+        services.AddScoped<SevitaValidationService>();
+        services.AddScoped<SevitaPostStrategy>();
+        services.AddScoped<SevitaPlugin>();
 
         return services;
     }
