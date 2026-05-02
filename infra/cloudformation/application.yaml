@@ -1,0 +1,507 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IPS AutoPost Platform — Stack 2: Application
+  IAM roles, ECS task definitions, ECS services, and auto-scaling policies.
+  Imports outputs from Stack 1 (infrastructure.yaml).
+
+# ===========================================================================
+# Parameters
+# ===========================================================================
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [uat, production]
+    Description: Deployment environment name.
+
+  DeploymentId:
+    Type: String
+    Description: >
+      Unique deployment identifier (e.g. GitHub Actions run number).
+      Used in ECS task definition family names to force a new revision on each deploy.
+
+  FeedWorkerImageUri:
+    Type: String
+    Description: Full ECR image URI for the FeedWorker (e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/ecr-ips-autopost-uat:abc1234)
+
+  PostWorkerImageUri:
+    Type: String
+    Description: Full ECR image URI for the PostWorker.
+
+  AwsRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region passed to containers as AWS_DEFAULT_REGION.
+
+# ===========================================================================
+# Resources
+# ===========================================================================
+Resources:
+
+  # -------------------------------------------------------------------------
+  # IAM — ECS Task Execution Role
+  # Used by ECS to pull images from ECR and write logs to CloudWatch.
+  # -------------------------------------------------------------------------
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ips-autopost-task-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # -------------------------------------------------------------------------
+  # IAM — ECS Task Role
+  # Used by the running container to call AWS services.
+  # -------------------------------------------------------------------------
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ips-autopost-task-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SqsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:SendMessage
+                Resource:
+                  - !ImportValue !Sub "ips-autopost-${Environment}-FeedQueueArn"
+                  - !ImportValue !Sub "ips-autopost-${Environment}-PostQueueArn"
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - "arn:aws:s3:::ips-invoice-images/*"
+                  - "arn:aws:s3:::ips-feed-archive/*"
+                  - "arn:aws:s3:::ips-output-files/*"
+                  - !Sub
+                    - "arn:aws:s3:::${BucketName}/*"
+                    - BucketName: !ImportValue !Sub "ips-autopost-${Environment}-DeploymentBucket"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/IPS/*"
+
+  # -------------------------------------------------------------------------
+  # IAM — EventBridge Scheduler Role (used by Scheduler Lambda)
+  # -------------------------------------------------------------------------
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ips-autopost-scheduler-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SendToSqs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !ImportValue !Sub "ips-autopost-${Environment}-FeedQueueArn"
+                  - !ImportValue !Sub "ips-autopost-${Environment}-PostQueueArn"
+
+  # -------------------------------------------------------------------------
+  # ECS Task Definition — FeedWorker
+  # -------------------------------------------------------------------------
+  FeedWorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "ips-autopost-feed-${Environment}-${DeploymentId}"
+      Cpu: "1024"       # 1 vCPU
+      Memory: "2048"    # 2 GB
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: feed-worker
+          Image: !Ref FeedWorkerImageUri
+          Essential: true
+          Environment:
+            - Name: SQS_QUEUE_URL
+              Value: !ImportValue !Sub "ips-autopost-${Environment}-FeedQueueURL"
+            - Name: ASPNETCORE_ENVIRONMENT
+              Value: !Ref Environment
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AwsRegion
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !ImportValue !Sub "ips-autopost-${Environment}-FeedWorkerLogGroup"
+              awslogs-region: !Ref AwsRegion
+              awslogs-stream-prefix: feed-worker
+
+  # -------------------------------------------------------------------------
+  # ECS Task Definition — PostWorker
+  # -------------------------------------------------------------------------
+  PostWorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "ips-autopost-post-${Environment}-${DeploymentId}"
+      Cpu: "1024"
+      Memory: "2048"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: post-worker
+          Image: !Ref PostWorkerImageUri
+          Essential: true
+          Environment:
+            - Name: SQS_QUEUE_URL
+              Value: !ImportValue !Sub "ips-autopost-${Environment}-PostQueueURL"
+            - Name: ASPNETCORE_ENVIRONMENT
+              Value: !Ref Environment
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AwsRegion
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !ImportValue !Sub "ips-autopost-${Environment}-PostWorkerLogGroup"
+              awslogs-region: !Ref AwsRegion
+              awslogs-stream-prefix: post-worker
+
+  # -------------------------------------------------------------------------
+  # ECS Services
+  # DesiredCount=1, MinCapacity=1 — always 1 task running (no cold start)
+  # -------------------------------------------------------------------------
+  FeedWorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "ips-autopost-feed-${Environment}"
+      Cluster: !ImportValue !Sub "ips-autopost-${Environment}-ECSClusterArn"
+      TaskDefinition: !Ref FeedWorkerTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Split [",", !ImportValue !Sub "ips-autopost-${Environment}-PrivateSubnets"]
+          SecurityGroups:
+            - !ImportValue !Sub "ips-autopost-${Environment}-ECSSecurityGroupId"
+          AssignPublicIp: DISABLED
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+
+  PostWorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "ips-autopost-post-${Environment}"
+      Cluster: !ImportValue !Sub "ips-autopost-${Environment}-ECSClusterArn"
+      TaskDefinition: !Ref PostWorkerTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Split [",", !ImportValue !Sub "ips-autopost-${Environment}-PrivateSubnets"]
+          SecurityGroups:
+            - !ImportValue !Sub "ips-autopost-${Environment}-ECSSecurityGroupId"
+          AssignPublicIp: DISABLED
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+
+  # -------------------------------------------------------------------------
+  # Auto Scaling — Scalable Targets
+  # MinCapacity=1 (never scale to 0), MaxCapacity=5
+  # -------------------------------------------------------------------------
+  FeedWorkerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: FeedWorkerService
+    Properties:
+      MaxCapacity: 5
+      MinCapacity: 1
+      ResourceId: !Sub
+        - "service/${ClusterName}/${ServiceName}"
+        - ClusterName: !ImportValue !Sub "ips-autopost-${Environment}-ECSClusterName"
+          ServiceName: !GetAtt FeedWorkerService.Name
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  PostWorkerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: PostWorkerService
+    Properties:
+      MaxCapacity: 5
+      MinCapacity: 1
+      ResourceId: !Sub
+        - "service/${ClusterName}/${ServiceName}"
+        - ClusterName: !ImportValue !Sub "ips-autopost-${Environment}-ECSClusterName"
+          ServiceName: !GetAtt PostWorkerService.Name
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # -------------------------------------------------------------------------
+  # Auto Scaling — SQS Step Scaling (Feed)
+  # Scale-out tier 1: 1–10 msgs → +1 task (cooldown 120s)
+  # Scale-out tier 2: >10 msgs  → +2 tasks
+  # Scale-in:         0 msgs for 10 min → -1 task (cooldown 600s)
+  # -------------------------------------------------------------------------
+  FeedWorkerScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-feed-scaleout-${Environment}"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref FeedWorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            MetricIntervalUpperBound: 10
+            ScalingAdjustment: 1
+          - MetricIntervalLowerBound: 10
+            ScalingAdjustment: 2
+
+  FeedWorkerScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-feed-scalein-${Environment}"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref FeedWorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 600
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  # -------------------------------------------------------------------------
+  # Auto Scaling — SQS Step Scaling (Post)
+  # -------------------------------------------------------------------------
+  PostWorkerScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-post-scaleout-${Environment}"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref PostWorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            MetricIntervalUpperBound: 10
+            ScalingAdjustment: 1
+          - MetricIntervalLowerBound: 10
+            ScalingAdjustment: 2
+
+  PostWorkerScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-post-scalein-${Environment}"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref PostWorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 600
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  # -------------------------------------------------------------------------
+  # Auto Scaling — CPU/Memory Target Tracking (Feed)
+  # Scale out >80%, scale in <20%
+  # -------------------------------------------------------------------------
+  FeedWorkerCpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-feed-cpu-${Environment}"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref FeedWorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 80.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+  FeedWorkerMemoryScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-feed-memory-${Environment}"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref FeedWorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        TargetValue: 80.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+  # -------------------------------------------------------------------------
+  # Auto Scaling — CPU/Memory Target Tracking (Post)
+  # -------------------------------------------------------------------------
+  PostWorkerCpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-post-cpu-${Environment}"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref PostWorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 80.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+  PostWorkerMemoryScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "ips-autopost-post-memory-${Environment}"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref PostWorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        TargetValue: 80.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Alarms — SQS scaling triggers (Feed)
+  # -------------------------------------------------------------------------
+  FeedQueueHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-feed-queue-high-${Environment}"
+      AlarmDescription: "Feed queue depth >= 1 — scale out"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-feed-queue-${Environment}"
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref FeedWorkerScaleOutPolicy
+
+  FeedQueueLowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-feed-queue-low-${Environment}"
+      AlarmDescription: "Feed queue depth = 0 for 10 min — scale in"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-feed-queue-${Environment}"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref FeedWorkerScaleInPolicy
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Alarms — SQS scaling triggers (Post)
+  # -------------------------------------------------------------------------
+  PostQueueHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-post-queue-high-${Environment}"
+      AlarmDescription: "Post queue depth >= 1 — scale out"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-post-queue-${Environment}"
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref PostWorkerScaleOutPolicy
+
+  PostQueueLowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-post-queue-low-${Environment}"
+      AlarmDescription: "Post queue depth = 0 for 10 min — scale in"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-post-queue-${Environment}"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref PostWorkerScaleInPolicy
+
+# ===========================================================================
+# Outputs
+# ===========================================================================
+Outputs:
+  SchedulerRoleArn:
+    Value: !GetAtt SchedulerRole.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-SchedulerRoleArn"
+
+  FeedWorkerServiceName:
+    Value: !GetAtt FeedWorkerService.Name
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-FeedWorkerServiceName"
+
+  PostWorkerServiceName:
+    Value: !GetAtt PostWorkerService.Name
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PostWorkerServiceName"

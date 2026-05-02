@@ -1,0 +1,214 @@
+name: Deploy IPS AutoPost Platform
+
+# ===========================================================================
+# Trigger: manual dispatch only — choose environment before deploying
+# ===========================================================================
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target deployment environment"
+        required: true
+        type: choice
+        options:
+          - uat
+          - production
+
+# ===========================================================================
+# Shared environment variables
+# ===========================================================================
+env:
+  AWS_REGION: us-east-1
+  DOTNET_VERSION: "10.0.x"
+
+# ===========================================================================
+# Jobs
+# ===========================================================================
+jobs:
+
+  # -------------------------------------------------------------------------
+  # Job 1: infrastructure
+  # Deploys Stack 1 (VPC, ECS cluster, SQS, ECR, log groups, S3 bucket).
+  # Outputs queue URLs, ECR URI, and cluster name for downstream jobs.
+  # -------------------------------------------------------------------------
+  infrastructure:
+    name: "Stack 1 — Infrastructure (${{ github.event.inputs.environment }})"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    outputs:
+      feed-queue-url:    ${{ steps.cfn-outputs.outputs.FeedQueueURL }}
+      post-queue-url:    ${{ steps.cfn-outputs.outputs.PostQueueURL }}
+      feed-queue-arn:    ${{ steps.cfn-outputs.outputs.FeedQueueArn }}
+      post-queue-arn:    ${{ steps.cfn-outputs.outputs.PostQueueArn }}
+      ecr-repository-uri: ${{ steps.cfn-outputs.outputs.ECRRepositoryURI }}
+      ecs-cluster-name:  ${{ steps.cfn-outputs.outputs.ECSClusterName }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Deploy Stack 1 — Infrastructure
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/cloudformation/infrastructure.yaml \
+            --stack-name "ips-autopost-infrastructure-${{ github.event.inputs.environment }}" \
+            --parameter-overrides \
+              Environment="${{ github.event.inputs.environment }}" \
+              ExistingRdsSecurityGroupId="${{ secrets.RDS_SECURITY_GROUP_ID }}" \
+              AlertEmail="${{ secrets.ALERT_EMAIL }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Read Stack 1 outputs
+        id: cfn-outputs
+        run: |
+          OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "ips-autopost-infrastructure-${{ github.event.inputs.environment }}" \
+            --query "Stacks[0].Outputs" \
+            --output json)
+
+          # Parse each output key into a GitHub Actions output variable
+          for row in $(echo "$OUTPUTS" | jq -r '.[] | @base64'); do
+            KEY=$(echo "$row" | base64 --decode | jq -r '.OutputKey')
+            VALUE=$(echo "$row" | base64 --decode | jq -r '.OutputValue')
+            echo "${KEY}=${VALUE}" >> "$GITHUB_OUTPUT"
+          done
+
+  # -------------------------------------------------------------------------
+  # Job 2: application
+  # Builds and pushes Docker images to ECR, then deploys Stack 2.
+  # Depends on: infrastructure
+  # -------------------------------------------------------------------------
+  application:
+    name: "Stack 2 — Application (${{ github.event.inputs.environment }})"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    needs: infrastructure
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ---- Build and push FeedWorker image --------------------------------
+      - name: Build FeedWorker image
+        run: |
+          docker build \
+            -f infra/docker/Dockerfile.FeedWorker \
+            -t "${{ needs.infrastructure.outputs.ecr-repository-uri }}:feed-${{ github.sha }}" \
+            -t "${{ needs.infrastructure.outputs.ecr-repository-uri }}:feed-latest" \
+            .
+
+      - name: Push FeedWorker image
+        run: |
+          docker push "${{ needs.infrastructure.outputs.ecr-repository-uri }}:feed-${{ github.sha }}"
+          docker push "${{ needs.infrastructure.outputs.ecr-repository-uri }}:feed-latest"
+
+      # ---- Build and push PostWorker image --------------------------------
+      - name: Build PostWorker image
+        run: |
+          docker build \
+            -f infra/docker/Dockerfile.PostWorker \
+            -t "${{ needs.infrastructure.outputs.ecr-repository-uri }}:post-${{ github.sha }}" \
+            -t "${{ needs.infrastructure.outputs.ecr-repository-uri }}:post-latest" \
+            .
+
+      - name: Push PostWorker image
+        run: |
+          docker push "${{ needs.infrastructure.outputs.ecr-repository-uri }}:post-${{ github.sha }}"
+          docker push "${{ needs.infrastructure.outputs.ecr-repository-uri }}:post-latest"
+
+      # ---- Deploy Stack 2 -------------------------------------------------
+      - name: Deploy Stack 2 — Application
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/cloudformation/application.yaml \
+            --stack-name "ips-autopost-application-${{ github.event.inputs.environment }}" \
+            --parameter-overrides \
+              Environment="${{ github.event.inputs.environment }}" \
+              DeploymentId="${{ github.run_number }}" \
+              FeedWorkerImageUri="${{ needs.infrastructure.outputs.ecr-repository-uri }}:feed-${{ github.sha }}" \
+              PostWorkerImageUri="${{ needs.infrastructure.outputs.ecr-repository-uri }}:post-${{ github.sha }}" \
+              AwsRegion="${{ env.AWS_REGION }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Wait for ECS services to stabilise
+        run: |
+          CLUSTER="${{ needs.infrastructure.outputs.ecs-cluster-name }}"
+          ENV="${{ github.event.inputs.environment }}"
+
+          echo "Waiting for FeedWorker service to stabilise..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "ips-autopost-feed-${ENV}"
+
+          echo "Waiting for PostWorker service to stabilise..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "ips-autopost-post-${ENV}"
+
+          echo "Both ECS services are stable."
+
+  # -------------------------------------------------------------------------
+  # Job 3: monitoring
+  # Deploys Stack 3 (CloudWatch dashboard + alarms).
+  # Depends on: infrastructure + application
+  # -------------------------------------------------------------------------
+  monitoring:
+    name: "Stack 3 — Monitoring (${{ github.event.inputs.environment }})"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    needs: [infrastructure, application]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Deploy Stack 3 — Monitoring
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/cloudformation/monitoring.yaml \
+            --stack-name "ips-autopost-monitoring-${{ github.event.inputs.environment }}" \
+            --parameter-overrides \
+              Environment="${{ github.event.inputs.environment }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Git SHA | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run number | ${{ github.run_number }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Feed Queue URL | ${{ needs.infrastructure.outputs.feed-queue-url }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Post Queue URL | ${{ needs.infrastructure.outputs.post-queue-url }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ECR Repository | ${{ needs.infrastructure.outputs.ecr-repository-uri }} |" >> "$GITHUB_STEP_SUMMARY"

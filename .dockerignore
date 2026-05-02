@@ -1,0 +1,25 @@
+# Exclude build output and NuGet restore caches from the Docker build context.
+# These Windows-generated files contain absolute paths (e.g. C:\Program Files\...)
+# that break the Linux container build with MSB4018 / fallback package folder errors.
+
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# Test projects — not needed in production images
+tests/
+
+# IDE and OS artifacts
+.vs/
+.git/
+.github/
+.kiro/
+**/.DS_Store
+**/Thumbs.db
+
+# Infra files not needed in the image
+infra/cloudformation/
+infra/scripts/
+
+# Markdown and docs
+*.md

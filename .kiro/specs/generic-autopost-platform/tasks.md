@@ -236,47 +236,47 @@
 
 ## Phase 7: Docker and Infrastructure
 
-- [ ] 22. Create Dockerfiles
-  - [ ] 22.1 Create Dockerfile.FeedWorker (multi-stage: sdk:10.0 build, runtime:10.0 final, linux-x64, ENTRYPOINT dotnet IPS.AutoPost.Host.FeedWorker.dll)
-  - [ ] 22.2 Create Dockerfile.PostWorker (same pattern for PostWorker)
-  - [ ] 22.3 Test local Docker build for both images
+- [x] 22. Create Dockerfiles
+  - [x] 22.1 Create Dockerfile.FeedWorker (multi-stage: sdk:10.0 build, runtime:10.0 final, linux-x64, ENTRYPOINT dotnet IPS.AutoPost.Host.FeedWorker.dll)
+  - [x] 22.2 Create Dockerfile.PostWorker (same pattern for PostWorker)
+  - [x] 22.3 Test local Docker build for both images
 
-- [ ] 23. Create CloudFormation Stack 1 — Infrastructure
-  - [ ] 23.1 Create infrastructure.yaml: VPC subnets (1 public + 2 private across 2 AZs), NAT Gateway + EIP, private route tables
-  - [ ] 23.2 Add ECS Security Group (egress: TCP 1433, 443, 80 to 0.0.0.0/0; no inbound)
-  - [ ] 23.3 Add AWS::EC2::SecurityGroupIngress rule to existing RDS security group (TCP 1433 from ECS SG)
-  - [ ] 23.4 Add ECR Repository (ecr-ips-autopost-{env}, ScanOnPush=true, lifecycle: delete untagged after 7 days)
-  - [ ] 23.5 Add ECS Cluster (ips-autopost-{env}, containerInsights=enabled)
-  - [ ] 23.6 Add SQS queues: ips-feed-queue-{env} + ips-post-queue-{env} (VisibilityTimeout=7200, MessageRetentionPeriod=1209600, maxReceiveCount=3)
-  - [ ] 23.7 Add SQS DLQs: ips-feed-dlq-{env} + ips-post-dlq-{env} (MessageRetentionPeriod=1209600)
-  - [ ] 23.8 Add CloudWatch Log Groups (/ips/autopost/feed/{env} + /ips/autopost/post/{env}, RetentionInDays=90)
-  - [ ] 23.9 Add S3 deployment bucket (ips-autopost-deployments-{env}, versioning enabled, all public access blocked)
-  - [ ] 23.10 Add Outputs (PrivateSubnets, ECSSecurityGroupId, ECSClusterName, FeedQueueURL, PostQueueURL, ECRRepositoryURI, log group names)
+- [x] 23. Create CloudFormation Stack 1 — Infrastructure
+  - [x] 23.1 Create infrastructure.yaml: VPC subnets (1 public + 2 private across 2 AZs), NAT Gateway + EIP, private route tables
+  - [x] 23.2 Add ECS Security Group (egress: TCP 1433, 443, 80 to 0.0.0.0/0; no inbound)
+  - [x] 23.3 Add AWS::EC2::SecurityGroupIngress rule to existing RDS security group (TCP 1433 from ECS SG)
+  - [x] 23.4 Add ECR Repository (ecr-ips-autopost-{env}, ScanOnPush=true, lifecycle: delete untagged after 7 days)
+  - [x] 23.5 Add ECS Cluster (ips-autopost-{env}, containerInsights=enabled)
+  - [x] 23.6 Add SQS queues: ips-feed-queue-{env} + ips-post-queue-{env} (VisibilityTimeout=7200, MessageRetentionPeriod=1209600, maxReceiveCount=3)
+  - [x] 23.7 Add SQS DLQs: ips-feed-dlq-{env} + ips-post-dlq-{env} (MessageRetentionPeriod=1209600)
+  - [x] 23.8 Add CloudWatch Log Groups (/ips/autopost/feed/{env} + /ips/autopost/post/{env}, RetentionInDays=90)
+  - [x] 23.9 Add S3 deployment bucket (ips-autopost-deployments-{env}, versioning enabled, all public access blocked)
+  - [x] 23.10 Add Outputs (PrivateSubnets, ECSSecurityGroupId, ECSClusterName, FeedQueueURL, PostQueueURL, ECRRepositoryURI, log group names)
 
-- [ ] 24. Create CloudFormation Stack 2 — Application
-  - [ ] 24.1 Create application.yaml: ECSTaskExecutionRole (AmazonECSTaskExecutionRolePolicy)
-  - [ ] 24.2 Add ECSTaskRole with policies: SQS (ReceiveMessage/DeleteMessage/GetQueueAttributes/GetQueueUrl), CloudWatch (PutMetricData), S3 (GetObject/PutObject), SecretsManager (GetSecretValue)
-  - [ ] 24.3 Add FeedWorker ECS Task Definition (Family: ips-autopost-feed-{env}-{DeploymentId}, CPU=1024, Memory=2048, env vars: SQS_QUEUE_URL/ASPNETCORE_ENVIRONMENT/AWS_DEFAULT_REGION)
-  - [ ] 24.4 Add PostWorker ECS Task Definition (same pattern, SQS_QUEUE_URL = PostQueueURL)
-  - [ ] 24.5 Add FeedWorker ECS Service (DesiredCount=1, MinCapacity=1 — always 1 task running to eliminate cold start; DeploymentConfig: MaximumPercent=200, MinimumHealthyPercent=100)
-  - [ ] 24.6 Add PostWorker ECS Service (DesiredCount=1, MinCapacity=1 — always 1 task running; same deployment config)
-  - [ ] 24.7 Add AutoScalingTargets for both services (MinCapacity=1, MaxCapacity=5 — scale UP from 1 when busy, scale DOWN to 1 when idle, never to 0)
-  - [ ] 24.8 Add SQS Step Scaling policies (scale-out: 1-10 msgs +1 task cooldown 120s, >10 msgs +2 tasks; scale-in: 0 msgs for 10 min -1 task cooldown 600s)
-  - [ ] 24.9 Add CPU/Memory scaling policies (>80% scale out cooldown 300s, <20% scale in cooldown 300s)
-  - [ ] 24.10 Add CloudWatch alarms for all scaling triggers (SQS high/low, CPU high/low, Memory high/low)
+- [x] 24. Create CloudFormation Stack 2 — Application
+  - [x] 24.1 Create application.yaml: ECSTaskExecutionRole (AmazonECSTaskExecutionRolePolicy)
+  - [x] 24.2 Add ECSTaskRole with policies: SQS (ReceiveMessage/DeleteMessage/GetQueueAttributes/GetQueueUrl), CloudWatch (PutMetricData), S3 (GetObject/PutObject), SecretsManager (GetSecretValue)
+  - [x] 24.3 Add FeedWorker ECS Task Definition (Family: ips-autopost-feed-{env}-{DeploymentId}, CPU=1024, Memory=2048, env vars: SQS_QUEUE_URL/ASPNETCORE_ENVIRONMENT/AWS_DEFAULT_REGION)
+  - [x] 24.4 Add PostWorker ECS Task Definition (same pattern, SQS_QUEUE_URL = PostQueueURL)
+  - [x] 24.5 Add FeedWorker ECS Service (DesiredCount=1, MinCapacity=1 — always 1 task running to eliminate cold start; DeploymentConfig: MaximumPercent=200, MinimumHealthyPercent=100)
+  - [x] 24.6 Add PostWorker ECS Service (DesiredCount=1, MinCapacity=1 — always 1 task running; same deployment config)
+  - [x] 24.7 Add AutoScalingTargets for both services (MinCapacity=1, MaxCapacity=5 — scale UP from 1 when busy, scale DOWN to 1 when idle, never to 0)
+  - [x] 24.8 Add SQS Step Scaling policies (scale-out: 1-10 msgs +1 task cooldown 120s, >10 msgs +2 tasks; scale-in: 0 msgs for 10 min -1 task cooldown 600s)
+  - [x] 24.9 Add CPU/Memory scaling policies (>80% scale out cooldown 300s, <20% scale in cooldown 300s)
+  - [x] 24.10 Add CloudWatch alarms for all scaling triggers (SQS high/low, CPU high/low, Memory high/low)
 
-- [ ] 25. Create CloudFormation Stack 3 — Monitoring
-  - [ ] 25.1 Create monitoring.yaml: CloudWatch Dashboard (IPS-AutoPost-Operations-{env}) with ECS CPU/Memory, SQS metrics, application metrics widgets
-  - [ ] 25.2 Add Application Error Alarm (>5 errors in 5 min, 2 eval periods of 300s, namespace IPS/AutoPost/{env})
-  - [ ] 25.3 Add FeedDLQ Alarm (>=1 message in ips-feed-dlq-{env}, 1 eval period of 300s)
-  - [ ] 25.4 Add PostDLQ Alarm (>=1 message in ips-post-dlq-{env}, 1 eval period of 300s)
+- [x] 25. Create CloudFormation Stack 3 — Monitoring
+  - [x] 25.1 Create monitoring.yaml: CloudWatch Dashboard (IPS-AutoPost-Operations-{env}) with ECS CPU/Memory, SQS metrics, application metrics widgets
+  - [x] 25.2 Add Application Error Alarm (>5 errors in 5 min, 2 eval periods of 300s, namespace IPS/AutoPost/{env})
+  - [x] 25.3 Add FeedDLQ Alarm (>=1 message in ips-feed-dlq-{env}, 1 eval period of 300s)
+  - [x] 25.4 Add PostDLQ Alarm (>=1 message in ips-post-dlq-{env}, 1 eval period of 300s)
 
-- [ ] 26. Create GitHub Actions CI/CD Pipeline
-  - [ ] 26.1 Create deploy.yml with workflow_dispatch trigger (environment: uat | production)
-  - [ ] 26.2 Add infrastructure job (deploy Stack 1, output FeedQueueURL/PostQueueURL/ECRRepositoryURI)
-  - [ ] 26.3 Add application job (depends on infrastructure: ECR login, build+push FeedWorker image tagged with git SHA, build+push PostWorker image, deploy Stack 2 with DeploymentId=github.run_number)
-  - [ ] 26.4 Add monitoring job (depends on infrastructure+application: deploy Stack 3)
-  - [ ] 26.5 Test full pipeline deployment to UAT environment
+- [x] 26. Create GitHub Actions CI/CD Pipeline
+  - [x] 26.1 Create deploy.yml with workflow_dispatch trigger (environment: uat | production)
+  - [x] 26.2 Add infrastructure job (deploy Stack 1, output FeedQueueURL/PostQueueURL/ECRRepositoryURI)
+  - [x] 26.3 Add application job (depends on infrastructure: ECR login, build+push FeedWorker image tagged with git SHA, build+push PostWorker image, deploy Stack 2 with DeploymentId=github.run_number)
+  - [x] 26.4 Add monitoring job (depends on infrastructure+application: deploy Stack 3)
+  - [x] 26.5 Test full pipeline deployment to UAT environment
 
 ---
 

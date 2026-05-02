@@ -1,0 +1,419 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IPS AutoPost Platform — Stack 1: Infrastructure
+  VPC networking, ECS cluster, SQS queues, ECR repository,
+  CloudWatch log groups, and S3 deployment bucket.
+  Parameterised by environment (uat | production).
+
+# ===========================================================================
+# Parameters
+# ===========================================================================
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [uat, production]
+    Description: Deployment environment name.
+
+  ExistingRdsSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: >
+      Security Group ID of the existing RDS SQL Server instance.
+      A TCP/1433 ingress rule from the ECS Security Group will be added to it.
+
+  VpcCidr:
+    Type: String
+    Default: "10.10.0.0/16"
+    Description: CIDR block for the new VPC.
+
+  PublicSubnetCidr:
+    Type: String
+    Default: "10.10.0.0/24"
+    Description: CIDR for the single public subnet (NAT Gateway lives here).
+
+  PrivateSubnetACidr:
+    Type: String
+    Default: "10.10.1.0/24"
+    Description: CIDR for private subnet A (AZ a).
+
+  PrivateSubnetBCidr:
+    Type: String
+    Default: "10.10.2.0/24"
+    Description: CIDR for private subnet B (AZ b).
+
+  AlertEmail:
+    Type: String
+    Description: Email address for DLQ CloudWatch alarm SNS notifications.
+
+# ===========================================================================
+# Resources
+# ===========================================================================
+Resources:
+
+  # -------------------------------------------------------------------------
+  # VPC
+  # -------------------------------------------------------------------------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-vpc-${Environment}"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-igw-${Environment}"
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # -------------------------------------------------------------------------
+  # Subnets — 1 public + 2 private across 2 AZs
+  # -------------------------------------------------------------------------
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-public-${Environment}"
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnetACidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-private-a-${Environment}"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnetBCidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-private-b-${Environment}"
+
+  # -------------------------------------------------------------------------
+  # NAT Gateway (in public subnet) + Elastic IP
+  # -------------------------------------------------------------------------
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-nat-${Environment}"
+
+  # -------------------------------------------------------------------------
+  # Route tables
+  # -------------------------------------------------------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-public-rt-${Environment}"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-private-rt-${Environment}"
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  # -------------------------------------------------------------------------
+  # ECS Security Group
+  # Egress: TCP 1433 (RDS), 443 (AWS APIs), 80 (HTTP)
+  # No inbound — workers poll SQS, they are never called inbound
+  # -------------------------------------------------------------------------
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "IPS AutoPost ECS tasks — ${Environment}"
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          CidrIp: "0.0.0.0/0"
+          Description: "SQL Server RDS"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+          Description: "AWS APIs (SQS, S3, Secrets Manager, CloudWatch)"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+          Description: "HTTP (Oracle Fusion, Sevita API)"
+      Tags:
+        - Key: Name
+          Value: !Sub "ips-autopost-ecs-sg-${Environment}"
+
+  # Allow ECS tasks to reach the existing RDS instance
+  RdsIngressFromEcs:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ExistingRdsSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 1433
+      ToPort: 1433
+      SourceSecurityGroupId: !Ref EcsSecurityGroup
+      Description: !Sub "IPS AutoPost ECS tasks (${Environment})"
+
+  # -------------------------------------------------------------------------
+  # ECR Repository
+  # -------------------------------------------------------------------------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "ecr-ips-autopost-${Environment}"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Delete untagged images after 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+
+  # -------------------------------------------------------------------------
+  # ECS Cluster
+  # -------------------------------------------------------------------------
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "ips-autopost-${Environment}"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # -------------------------------------------------------------------------
+  # SQS Queues + DLQs
+  # -------------------------------------------------------------------------
+  FeedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "ips-feed-dlq-${Environment}"
+      MessageRetentionPeriod: 1209600   # 14 days
+
+  PostDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "ips-post-dlq-${Environment}"
+      MessageRetentionPeriod: 1209600
+
+  FeedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "ips-feed-queue-${Environment}"
+      VisibilityTimeout: 7200           # 2 hours — accommodates long feed downloads
+      MessageRetentionPeriod: 1209600   # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt FeedDlq.Arn
+        maxReceiveCount: 3
+
+  PostQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "ips-post-queue-${Environment}"
+      VisibilityTimeout: 7200
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PostDlq.Arn
+        maxReceiveCount: 3
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Log Groups
+  # -------------------------------------------------------------------------
+  FeedWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ips/autopost/feed/${Environment}"
+      RetentionInDays: 90
+
+  PostWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ips/autopost/post/${Environment}"
+      RetentionInDays: 90
+
+  # -------------------------------------------------------------------------
+  # S3 Deployment Bucket
+  # -------------------------------------------------------------------------
+  DeploymentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "ips-autopost-deployments-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # -------------------------------------------------------------------------
+  # SNS Topic for DLQ alarms
+  # -------------------------------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "ips-autopost-alerts-${Environment}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+# ===========================================================================
+# Outputs
+# ===========================================================================
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-VpcId"
+
+  PrivateSubnets:
+    Value: !Join [",", [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PrivateSubnets"
+
+  ECSSecurityGroupId:
+    Value: !Ref EcsSecurityGroup
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-ECSSecurityGroupId"
+
+  ECSClusterName:
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-ECSClusterName"
+
+  ECSClusterArn:
+    Value: !GetAtt EcsCluster.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-ECSClusterArn"
+
+  FeedQueueURL:
+    Value: !Ref FeedQueue
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-FeedQueueURL"
+
+  FeedQueueArn:
+    Value: !GetAtt FeedQueue.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-FeedQueueArn"
+
+  PostQueueURL:
+    Value: !Ref PostQueue
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PostQueueURL"
+
+  PostQueueArn:
+    Value: !GetAtt PostQueue.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PostQueueArn"
+
+  FeedDlqArn:
+    Value: !GetAtt FeedDlq.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-FeedDlqArn"
+
+  PostDlqArn:
+    Value: !GetAtt PostDlq.Arn
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PostDlqArn"
+
+  ECRRepositoryURI:
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ecr-ips-autopost-${Environment}"
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-ECRRepositoryURI"
+
+  FeedWorkerLogGroupName:
+    Value: !Ref FeedWorkerLogGroup
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-FeedWorkerLogGroup"
+
+  PostWorkerLogGroupName:
+    Value: !Ref PostWorkerLogGroup
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-PostWorkerLogGroup"
+
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-AlertTopicArn"
+
+  DeploymentBucketName:
+    Value: !Ref DeploymentBucket
+    Export:
+      Name: !Sub "ips-autopost-${Environment}-DeploymentBucket"

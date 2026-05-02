@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "../../MOB_API_Lib"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../GenericMissingInvoicesProcess"
+		},
+		{
+			"path": "../../../JobCreationModule/JobCreationAPI"
+		}
+	],
+	"settings": {}
+}

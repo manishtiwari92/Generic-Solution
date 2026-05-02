@@ -1,0 +1,71 @@
+# =============================================================================
+# Dockerfile.PostWorker
+# IPS.AutoPost Platform — Post Worker (ECS Fargate)
+# Multi-stage build: sdk:10.0 → runtime:10.0, linux-x64
+# =============================================================================
+
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copy solution and central package management files first (layer cache)
+COPY IPS.AutoPost.Platform.sln ./
+COPY Directory.Build.props ./
+COPY Directory.Packages.props ./
+COPY global.json ./
+
+# Copy NuGet config that clears Windows fallback package folders.
+# Without this, a restore cache baked on Windows embeds paths like
+# "C:\Program Files (x86)\Microsoft Visual Studio\Shared\NuGetPackages"
+# which do not exist inside the Linux container and cause MSB4018.
+COPY infra/docker/NuGet.Docker.Config ./NuGet.Config
+
+# Copy all project files so NuGet restore can resolve the full dependency graph
+COPY src/IPS.AutoPost.Core/IPS.AutoPost.Core.csproj                               src/IPS.AutoPost.Core/
+COPY src/IPS.AutoPost.Plugins/IPS.AutoPost.Plugins.csproj                         src/IPS.AutoPost.Plugins/
+COPY src/IPS.AutoPost.Host.FeedWorker/IPS.AutoPost.Host.FeedWorker.csproj         src/IPS.AutoPost.Host.FeedWorker/
+COPY src/IPS.AutoPost.Host.PostWorker/IPS.AutoPost.Host.PostWorker.csproj         src/IPS.AutoPost.Host.PostWorker/
+COPY src/IPS.AutoPost.Api/IPS.AutoPost.Api.csproj                                 src/IPS.AutoPost.Api/
+COPY src/IPS.AutoPost.Scheduler/IPS.AutoPost.Scheduler.csproj                     src/IPS.AutoPost.Scheduler/
+
+# Restore — cached as long as .csproj / props files are unchanged
+RUN dotnet restore src/IPS.AutoPost.Host.PostWorker/IPS.AutoPost.Host.PostWorker.csproj \
+    --runtime linux-x64
+
+# Copy full source
+COPY src/ src/
+
+# Publish framework-dependent, linux-x64 release build
+RUN dotnet publish src/IPS.AutoPost.Host.PostWorker/IPS.AutoPost.Host.PostWorker.csproj \
+    --configuration Release \
+    --runtime linux-x64 \
+    --self-contained false \
+    --no-restore \
+    --output /app/publish \
+    -p:PublishSingleFile=false
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+
+# Install curl for ECS health-check probes (optional but useful)
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Run as non-root for security (ECS Fargate supports non-root containers)
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
+
+WORKDIR /app
+
+COPY --from=build /app/publish ./
+
+# Ensure the app user owns the working directory
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
+# Environment defaults — overridden by ECS task definition environment variables
+ENV ASPNETCORE_ENVIRONMENT=production \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    DOTNET_USE_POLLING_FILE_WATCHER=false
+
+ENTRYPOINT ["dotnet", "IPS.AutoPost.Host.PostWorker.dll"]

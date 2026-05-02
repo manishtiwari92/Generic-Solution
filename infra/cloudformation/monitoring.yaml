@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IPS AutoPost Platform — Stack 3: Monitoring
+  CloudWatch Dashboard, application error alarm, DLQ alarms.
+  Imports outputs from Stack 1 (infrastructure.yaml).
+
+# ===========================================================================
+# Parameters
+# ===========================================================================
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [uat, production]
+    Description: Deployment environment name.
+
+# ===========================================================================
+# Resources
+# ===========================================================================
+Resources:
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Dashboard
+  # -------------------------------------------------------------------------
+  OperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "IPS-AutoPost-Operations-${Environment}"
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {
+                "type": "metric",
+                "x": 0, "y": 0, "width": 12, "height": 6,
+                "properties": {
+                  "title": "ECS CPU Utilization",
+                  "metrics": [
+                    ["AWS/ECS", "CPUUtilization", "ClusterName", "ips-autopost-${Environment}", "ServiceName", "ips-autopost-feed-${Environment}"],
+                    ["AWS/ECS", "CPUUtilization", "ClusterName", "ips-autopost-${Environment}", "ServiceName", "ips-autopost-post-${Environment}"]
+                  ],
+                  "period": 300,
+                  "stat": "Average",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12, "y": 0, "width": 12, "height": 6,
+                "properties": {
+                  "title": "ECS Memory Utilization",
+                  "metrics": [
+                    ["AWS/ECS", "MemoryUtilization", "ClusterName", "ips-autopost-${Environment}", "ServiceName", "ips-autopost-feed-${Environment}"],
+                    ["AWS/ECS", "MemoryUtilization", "ClusterName", "ips-autopost-${Environment}", "ServiceName", "ips-autopost-post-${Environment}"]
+                  ],
+                  "period": 300,
+                  "stat": "Average",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 0, "y": 6, "width": 12, "height": 6,
+                "properties": {
+                  "title": "SQS Queue Depth",
+                  "metrics": [
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "ips-feed-queue-${Environment}"],
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "ips-post-queue-${Environment}"]
+                  ],
+                  "period": 60,
+                  "stat": "Maximum",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12, "y": 6, "width": 12, "height": 6,
+                "properties": {
+                  "title": "SQS DLQ Depth",
+                  "metrics": [
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "ips-feed-dlq-${Environment}"],
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "ips-post-dlq-${Environment}"]
+                  ],
+                  "period": 300,
+                  "stat": "Maximum",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 0, "y": 12, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Post Success / Failed Count",
+                  "metrics": [
+                    ["IPS/AutoPost/${Environment}", "PostSuccessCount"],
+                    ["IPS/AutoPost/${Environment}", "PostFailedCount"]
+                  ],
+                  "period": 300,
+                  "stat": "Sum",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12, "y": 12, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Post Duration (seconds)",
+                  "metrics": [
+                    ["IPS/AutoPost/${Environment}", "PostDurationSeconds"]
+                  ],
+                  "period": 300,
+                  "stat": "Average",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 0, "y": 18, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Feed Records Downloaded",
+                  "metrics": [
+                    ["IPS/AutoPost/${Environment}", "FeedRecordsDownloaded"]
+                  ],
+                  "period": 300,
+                  "stat": "Sum",
+                  "view": "timeSeries"
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12, "y": 18, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Image Retry Attempts / Successes",
+                  "metrics": [
+                    ["IPS/AutoPost/${Environment}", "ImageRetryAttempted"],
+                    ["IPS/AutoPost/${Environment}", "ImageRetrySucceeded"]
+                  ],
+                  "period": 300,
+                  "stat": "Sum",
+                  "view": "timeSeries"
+                }
+              }
+            ]
+          }
+        - Environment: !Ref Environment
+
+  # -------------------------------------------------------------------------
+  # Application Error Alarm
+  # >5 PostFailedCount events in 5 minutes (2 eval periods of 300s)
+  # -------------------------------------------------------------------------
+  ApplicationErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-post-errors-${Environment}"
+      AlarmDescription: !Sub "More than 5 post failures in 5 minutes (${Environment})"
+      Namespace: !Sub "IPS/AutoPost/${Environment}"
+      MetricName: PostFailedCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !ImportValue !Sub "ips-autopost-${Environment}-AlertTopicArn"
+      OKActions:
+        - !ImportValue !Sub "ips-autopost-${Environment}-AlertTopicArn"
+
+  # -------------------------------------------------------------------------
+  # Feed DLQ Alarm
+  # >=1 message in ips-feed-dlq — 1 eval period of 300s
+  # -------------------------------------------------------------------------
+  FeedDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-feed-dlq-${Environment}"
+      AlarmDescription: !Sub "Message arrived in ips-feed-dlq-${Environment} — processing failed 3 times"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-feed-dlq-${Environment}"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !ImportValue !Sub "ips-autopost-${Environment}-AlertTopicArn"
+
+  # -------------------------------------------------------------------------
+  # Post DLQ Alarm
+  # >=1 message in ips-post-dlq — 1 eval period of 300s
+  # -------------------------------------------------------------------------
+  PostDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ips-autopost-post-dlq-${Environment}"
+      AlarmDescription: !Sub "Message arrived in ips-post-dlq-${Environment} — processing failed 3 times"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "ips-post-dlq-${Environment}"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !ImportValue !Sub "ips-autopost-${Environment}-AlertTopicArn"
+
+# ===========================================================================
+# Outputs
+# ===========================================================================
+Outputs:
+  DashboardName:
+    Value: !Ref OperationsDashboard
+    Description: CloudWatch Operations Dashboard name.
+
+  ApplicationErrorAlarmArn:
+    Value: !GetAtt ApplicationErrorAlarm.Arn
+
+  FeedDlqAlarmArn:
+    Value: !GetAtt FeedDlqAlarm.Arn
+
+  PostDlqAlarmArn:
+    Value: !GetAtt PostDlqAlarm.Arn
