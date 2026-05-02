@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\IPS.AutoPost.Core\IPS.AutoPost.Core.csproj" />
     <ProjectReference Include="..\..\src\IPS.AutoPost.Plugins\IPS.AutoPost.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\IPS.AutoPost.Host.PostWorker\IPS.AutoPost.Host.PostWorker.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +35,9 @@
     
     <!-- HTTP Mock Server for Oracle Fusion and Sevita API integration tests -->
     <PackageReference Include="WireMock.Net" />
+    
+    <!-- AWS SDK — needed for SQS delivery guarantee tests -->
+    <PackageReference Include="AWSSDK.SQS" />
     
     <!-- EF Core InMemory -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />

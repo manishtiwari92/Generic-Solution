@@ -282,17 +282,17 @@
 
 ## Phase 8: Property-Based Tests
 
-- [ ] 27. Implement all 10 PBT correctness properties
-  - [ ] 27.1 PostInProcess Invariant: FOR ALL failure modes (success/imageNotFound/apiFail/exception), PostInProcess=0 after processing
-  - [ ] 27.2 No-Duplicate Routing Invariant: FOR ALL scenarios, workitem ends in exactly one queue (not source queue)
-  - [ ] 27.3 History Completeness Invariant: count(history rows) == count(workitems where API was attempted)
-  - [ ] 27.4 UseTax Round-Trip Property: UseTax=NO -> no ShipToLocation in any line; UseTax=YES -> ShipToLocation present in all lines
-  - [ ] 27.5 Feed Idempotence Property: running feed download twice produces same row count as once
-  - [ ] 27.6 Incremental Feed Subset Property: incremental supplier IDs is subset of full supplier IDs, count(incremental) <= count(full)
-  - [ ] 27.7 Pagination Completeness Property: total records inserted == sum of all items across all pages
-  - [ ] 27.8 Error Condition Routing Property: image-not-found -> EdenredFailPostQueueId with zero API calls; RequesterId-empty -> InvitedFailPostQueueId with zero API calls
-  - [ ] 27.9 Retry Idempotence Property: ImagePostRetryCount increments by exactly 1 per attempt, stops at ImagePostRetryLimit
-  - [ ] 27.10 SQS Message Delivery Guarantee: message either deleted (success) or in DLQ after exactly 3 failures
+- [x] 27. Implement all 10 PBT correctness properties
+  - [x] 27.1 PostInProcess Invariant: FOR ALL failure modes (success/imageNotFound/apiFail/exception), PostInProcess=0 after processing
+  - [x] 27.2 No-Duplicate Routing Invariant: FOR ALL scenarios, workitem ends in exactly one queue (not source queue)
+  - [x] 27.3 History Completeness Invariant: count(history rows) == count(workitems where API was attempted)
+  - [x] 27.4 UseTax Round-Trip Property: UseTax=NO -> no ShipToLocation in any line; UseTax=YES -> ShipToLocation present in all lines
+  - [x] 27.5 Feed Idempotence Property: running feed download twice produces same row count as once
+  - [x] 27.6 Incremental Feed Subset Property: incremental supplier IDs is subset of full supplier IDs, count(incremental) <= count(full)
+  - [x] 27.7 Pagination Completeness Property: total records inserted == sum of all items across all pages
+  - [x] 27.8 Error Condition Routing Property: image-not-found -> EdenredFailPostQueueId with zero API calls; RequesterId-empty -> InvitedFailPostQueueId with zero API calls
+  - [x] 27.9 Retry Idempotence Property: ImagePostRetryCount increments by exactly 1 per attempt, stops at ImagePostRetryLimit
+  - [x] 27.10 SQS Message Delivery Guarantee: message either deleted (success) or in DLQ after exactly 3 failures
 
 ---
 
