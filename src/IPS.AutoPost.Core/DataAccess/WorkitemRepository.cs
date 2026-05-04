@@ -128,12 +128,12 @@ public class WorkitemRepository : IWorkitemRepository
         CancellationToken ct = default)
     {
         // dbo.split is an existing TVF in the Workflow database.
-        // It splits a comma-separated string into a table of (items) values.
-        // We join against it to avoid dynamic SQL with user-supplied values.
+        // Delimiter is ', ' (comma-space) to match the legacy Windows Service implementation.
+        // The TVF splits the string into a table of (items) values.
         const string sql = """
             SELECT w.ItemId, w.StatusId, w.JobId
             FROM   Workitems w
-            JOIN   dbo.split(@ItemIds, ',') s ON w.ItemId = s.items
+            JOIN   dbo.split(@ItemIds, ', ') s ON w.ItemId = s.items
             """;
 
         return await SqlHelper.ExecuteDatasetAsync(

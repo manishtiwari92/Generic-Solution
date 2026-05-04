@@ -1,3 +1,4 @@
+using System.Net;
 using IPS.AutoPost.Core.Interfaces;
 using IPS.AutoPost.Core.Models;
 using IPS.AutoPost.Plugins.InvitedClub.Models;
@@ -37,6 +38,16 @@ public class InvitedClubPlugin : IClientPlugin
         _postStrategy = postStrategy;
         _feedStrategy = feedStrategy;
         _logger = logger;
+
+        // Task 30.8: Set TLS protocol for Oracle Fusion compatibility.
+        // Oracle Fusion Cloud requires TLS 1.0/1.1/1.2 to be explicitly enabled.
+        // Set once at plugin construction time (not per-request).
+#pragma warning disable SYSLIB0014 // ServicePointManager is obsolete in .NET 6+ but still functional
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls |
+            SecurityProtocolType.Tls11 |
+            SecurityProtocolType.Tls12;
+#pragma warning restore SYSLIB0014
     }
 
     // -----------------------------------------------------------------------
@@ -49,6 +60,14 @@ public class InvitedClubPlugin : IClientPlugin
     /// <c>InvoiceId</c> but no <c>AttachedDocumentId</c>) by delegating to
     /// <see cref="InvitedClubRetryService.RetryPostImagesAsync"/>.
     /// </summary>
+    /// <remarks>
+    /// Task 30.9: The legacy <c>@IsNewUI</c> parameter (passed to <c>get_invitedclub_configuration</c>
+    /// in the old Windows Service) is not applicable in the new platform. Configuration is loaded
+    /// from <c>generic_job_configuration</c> via <see cref="IConfigurationRepository"/>.
+    /// The "NEWUI" caller behavior (setting <c>processManually = true</c>) is handled by
+    /// <see cref="PostContext.ProcessManually"/> which returns <c>true</c> when
+    /// <c>TriggerType == "Manual"</c> or <c>ItemIds</c> is non-empty.
+    /// </remarks>
     public async Task OnBeforePostAsync(GenericJobConfig config, CancellationToken ct)
     {
         _logger.LogInformation(

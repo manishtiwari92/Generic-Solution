@@ -28,6 +28,7 @@ public class AutoPostOrchestrator
     private readonly IScheduleRepository _scheduleRepo;
     private readonly PluginRegistry _pluginRegistry;
     private readonly SchedulerService _scheduler;
+    private readonly ICloudWatchMetricsService _metrics;
     private readonly ILogger<AutoPostOrchestrator> _logger;
 
     public AutoPostOrchestrator(
@@ -38,6 +39,7 @@ public class AutoPostOrchestrator
         IScheduleRepository scheduleRepo,
         PluginRegistry pluginRegistry,
         SchedulerService scheduler,
+        ICloudWatchMetricsService metrics,
         ILogger<AutoPostOrchestrator> logger)
     {
         _configRepo = configRepo;
@@ -47,6 +49,7 @@ public class AutoPostOrchestrator
         _scheduleRepo = scheduleRepo;
         _pluginRegistry = pluginRegistry;
         _scheduler = scheduler;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -114,6 +117,12 @@ public class AutoPostOrchestrator
         var result = await ExecutePostBatchAsync(plugin, config, context, startTime, ct);
 
         await _configRepo.UpdateLastPostTimeAsync(config.Id, ct);
+
+        // Publish CloudWatch metrics after each batch (task 30.3)
+        var durationSeconds = (DateTime.UtcNow - startTime).TotalSeconds;
+        await _metrics.PostSuccessCountAsync(clientType, jobId, result.RecordsSuccess, ct);
+        await _metrics.PostFailedCountAsync(clientType, jobId, result.RecordsFailed, ct);
+        await _metrics.PostDurationSecondsAsync(clientType, jobId, durationSeconds, ct);
 
         _logger.LogInformation(
             "[{ClientType}] Job {JobId} - Scheduled post completed: {Success} success, {Failed} failed.",
@@ -193,6 +202,7 @@ public class AutoPostOrchestrator
         string clientType,
         CancellationToken ct)
     {
+        var startTime = DateTime.UtcNow;
         var config = await _configRepo.GetByJobIdAsync(jobId, ct);
 
         if (config == null || !config.IsActive || !config.DownloadFeed)
@@ -218,6 +228,12 @@ public class AutoPostOrchestrator
         if (result.IsApplicable && result.Success)
         {
             await _configRepo.UpdateLastDownloadTimeAsync(config.Id, ct);
+
+            // Publish CloudWatch metrics after successful feed (task 30.3)
+            var durationSeconds = (DateTime.UtcNow - startTime).TotalSeconds;
+            await _metrics.FeedRecordsDownloadedAsync(clientType, jobId, result.RecordsDownloaded, ct);
+            await _metrics.FeedDurationSecondsAsync(clientType, jobId, durationSeconds, ct);
+
             _logger.LogInformation(
                 "[{ClientType}] Job {JobId} - Feed download completed: {Records} records.",
                 clientType, jobId, result.RecordsDownloaded);

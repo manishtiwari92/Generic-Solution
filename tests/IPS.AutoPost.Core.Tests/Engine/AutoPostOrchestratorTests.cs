@@ -26,6 +26,7 @@ public class AutoPostOrchestratorTests
     private readonly Mock<IClientPlugin> _plugin = new();
     private readonly Mock<SchedulerService> _scheduler = new();
     private readonly PluginRegistry _registry = new();
+    private readonly Mock<ICloudWatchMetricsService> _metrics = new();
     private readonly Mock<ILogger<AutoPostOrchestrator>> _logger = new();
 
     private AutoPostOrchestrator CreateOrchestrator()
@@ -33,6 +34,23 @@ public class AutoPostOrchestratorTests
         // Only register the plugin mock if it has a non-null ClientType set
         if (_plugin.Object.ClientType != null)
             _registry.Register(_plugin.Object);
+
+        // Default: metrics calls are no-ops
+        _metrics
+            .Setup(m => m.PostSuccessCountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _metrics
+            .Setup(m => m.PostFailedCountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _metrics
+            .Setup(m => m.PostDurationSecondsAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _metrics
+            .Setup(m => m.FeedRecordsDownloadedAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _metrics
+            .Setup(m => m.FeedDurationSecondsAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         return new AutoPostOrchestrator(
             _configRepo.Object,
@@ -42,6 +60,7 @@ public class AutoPostOrchestratorTests
             _scheduleRepo.Object,
             _registry,
             _scheduler.Object,
+            _metrics.Object,
             _logger.Object);
     }
 

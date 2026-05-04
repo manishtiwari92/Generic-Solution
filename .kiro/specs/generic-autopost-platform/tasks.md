@@ -98,7 +98,7 @@
 - [x] 8. Create data seed scripts (existing client configurations)
   - [x] 8.1 Create INSERT script: populate generic_job_configuration from post_to_invitedclub_configuration (client_type='INVITEDCLUB')
   - [x] 8.2 Create INSERT script: populate generic_execution_schedule from GetExecutionSchedule data for InvitedClub
-  - [x] 8.3 Create INSERT script: populate generic_job_configuration from post_to_sevita_configuration (client_type='SEVITA')
+  - [x] 8.3 Create INSERT script: populate generic_job_configuration from post_to_sevita_configuration (client_type='SEVITA') — NOTE: post_to_sevita_configuration uses configuration_id as PK (not id); UpdateLastPostTime SP uses WHERE configuration_id=@configuration_id; migration INSERT must reference configuration_id correctly
   - [x] 8.4 Create INSERT script: populate generic_execution_schedule for Sevita
   - [x] 8.5 Verify all existing stored procedures still callable with unchanged parameters (get_invitedclub_configuration, GetExecutionSchedule, InvitedClub_GetHeaderAndDetailData, InvitedClub_GetFailedImagesData, WORKITEM_ROUTE, GENERALLOG_INSERT, get_sevita_configurations, GetSevitaHeaderAndDetailDataByItem, UpdateSevitaHeaderPostFields)
 
@@ -107,7 +107,7 @@
 ## Phase 3: InvitedClub Plugin
 
 - [x] 9. Create InvitedClub models and constants
-  - [x] 9.1 Create InvitedClubConfig.cs (ImagePostRetryLimit, EdenredFailQueueId, InvitedFailQueueId, FeedDownloadTime, LastSupplierDownloadTime)
+  - [x] 9.1 Create InvitedClubConfig.cs (ImagePostRetryLimit, EdenredFailQueueId, InvitedFailQueueId, FeedDownloadTime, LastSupplierDownloadTime, UserId — NOTE: the user ID field is named UserId (int), NOT DefaultUserId; all references in InvitedClubPlugin and InvitedClubPostStrategy must use invitedClubConfig.UserId)
   - [x] 9.2 Create InvoiceRequest.cs (InvoiceRequest, InvoiceLine, InvoiceDistribution, InvoiceDff)
   - [x] 9.3 Create AttachmentRequest.cs
   - [x] 9.4 Create InvoiceCalculateTaxRequest.cs
@@ -165,7 +165,7 @@
 ## Phase 4: Sevita Plugin
 
 - [x] 14. Create Sevita models and constants
-  - [x] 14.1 Create SevitaConfig.cs (IsPORecord, PostJsonPath, TDriveLocation, NewUiTDriveLocation, RemotePath, ApiAccessTokenUrl, ClientId, ClientSecret, TokenExpirationMin)
+  - [x] 14.1 Create SevitaConfig.cs (IsPORecord, PostJsonPath, TDriveLocation, NewUiTDriveLocation, RemotePath, ApiAccessTokenUrl, ClientId, ClientSecret, TokenExpirationMin; also add DBErrorEmailConfiguration nested class with ToEmailAddress, CcEmailAddress, EmailSubject, EmailTemplate — populated from get_sevita_configurations SP fields: db_error_to_email_address, db_error_cc_email_address, db_error_email_subject, db_error_email_template)
   - [x] 14.2 Create InvoiceRequest.cs (InvoiceRequest with vendorId/employeeId/payAlone/invoiceRelatedToZycusPurchase/zycusInvoiceNumber/invoiceNumber/invoiceDate/expensePeriod/checkMemo/cerfTrackingNumber/remittanceRequired/edenredInvoiceId, InvoiceLine with alias/amount/naturalAccountNumber/edenredLineItemId, AttachmentRequest with fileName/fileBase/fileUrl/docid)
   - [x] 14.3 Create InvoiceResponse.cs (InvoiceResponse with Status/InvoiceId/Result/ErrorMsg, InvoicePostResponse)
   - [x] 14.4 Create ValidIds.cs (HashSet<string> VendorIds, HashSet<string> EmployeeIds)
@@ -186,17 +186,17 @@
   - [x] 16.1 Implement BuildLineItems (group detail rows by alias+naturalAccountNumber, sum LineAmount per group, format amount to 2 decimal places, edenredLineItemId = edenredInvoiceId + "_" + lineItemCount)
   - [x] 16.2 Implement SerializePayload (serialize InvoiceRequest then wrap in JSON array "[{...}]")
   - [x] 16.3 Implement UploadAuditJsonAsync (if post_json_path configured: write JSON to temp file, upload to S3 at {post_json_path}/{itemId}_{timestamp}.json, delete temp file)
-  - [x] 16.4 Implement PostInvoiceAsync (POST to InvoicePostURL, Authorization: Bearer {token}, Timeout=-1; use request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) NOT AddJsonBody; HTTP 201: extract InvoiceId from invoiceIds first property name; HTTP 500: special error message "Internal Server error occurred while posting invoice."; other: extract recordErrors/message/invoiceIds/failedRecords; load api_response_configuration via GetAPIResponseTypes at start of PostData for manual posts)
-  - [x] 16.5 Implement SaveHistoryAsync (INSERT into sevita_posted_records_history with fileBase=null on all attachments — use JArray to null out fileBase before saving)
-  - [x] 16.6 Implement SendNotificationEmailAsync (to FailedPostConfiguration.EmailTo split by ';', HTML table from failed records excluding IsSendNotification column, uses GenerateHtmlTable())
-  - [x] 16.7 Implement ExecuteAsync main loop (for each workitem: get image from S3 always, validate, build payload, upload audit JSON, PostInvoice, route to success/fail, save history, call UpdateSevitaHeaderPostFields SP; after loop: send notification email if any failed)
+  - [x] 16.4 Implement PostInvoiceAsync (POST to InvoicePostURL, Authorization: Bearer {token}, Timeout=-1; use request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) NOT AddJsonBody — this is a Sevita-specific API requirement, different from InvitedClub calculateTax which uses AddJsonBody; HTTP 201: extract InvoiceId from invoiceIds first property name; HTTP 500: special error message "Internal Server error occurred while posting invoice."; other: extract recordErrors/message/invoiceIds/failedRecords; load api_response_configuration via GetAPIResponseTypes at start of PostData for manual posts)
+  - [x] 16.5 Implement SaveHistoryAsync (INSERT into sevita_posted_records_history with fileBase=null on all attachments — parse invoiceRequestJson as JArray (NOT JObject) because the payload is wrapped in [{...}]; use JArray.Parse(invoiceRequestJson) then iterate each item's attachments array to set fileBase=null before saving)
+  - [x] 16.6 Implement SendNotificationEmailAsync (to FailedPostConfiguration.EmailTo split by ';', HTML table from failed records excluding IsSendNotification column, uses GenerateHtmlTable(), replace [[AppendTable]] placeholder in email template — NOT #MissingImagesTable#; this matches EmailSender.SendPostNotificationMail which calls mailBody.Replace("[[AppendTable]]", tableBody))
+  - [x] 16.7 Implement ExecuteAsync main loop (for each workitem: get image from S3 always, validate, build payload, upload audit JSON, PostInvoice, route to success/fail, save history — NOTE: history IS written even for image-fail workitems with empty InvoiceRequestJson="" and InvoiceResponseJson=""; call UpdateSevitaHeaderPostFields SP; after loop: send notification email if any failed)
   - [x] 16.8 Write unit tests for BuildLineItems (grouping by alias+naturalAccountNumber, amount summing, edenredLineItemId format)
   - [x] 16.9 Write unit tests for SerializePayload (output is valid JSON array, fileBase present in payload)
   - [x] 16.10 Write unit tests for SaveHistoryAsync (fileBase is null in stored JSON, other fields preserved)
-  - [x] 16.11 Write unit tests for ExecuteAsync (image not found -> FailedPostsQueueId + history written; validation fail -> FailedPostsQueueId, no API call; HTTP 201 -> SuccessQueueId; HTTP 500 -> FailedPostsQueueId with special message)
+  - [x] 16.11 Write unit tests for ExecuteAsync (image not found -> FailedPostsQueueId + history written with empty request/response JSON [Sevita DOES write history on image-fail, unlike InvitedClub]; validation fail -> FailedPostsQueueId, no API call; HTTP 201 -> SuccessQueueId; HTTP 500 -> FailedPostsQueueId with special message)
 
 - [x] 17. Implement SevitaPlugin and register
-  - [x] 17.1 Implement SevitaPlugin.OnBeforePostAsync (load ValidIds from Sevita_Supplier_SiteInformation_Feed + Sevita_Employee_Feed)
+  - [x] 17.1 Implement SevitaPlugin.OnBeforePostAsync (load ValidIds using raw SqlConnection + SqlCommand directly — NOT SqlHelper — with multi-statement query: "SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed; SELECT EmployeeID FROM Sevita_Employee_Feed"; read both result sets using SqlDataReader.NextResult() in one round trip; populate ValidIds.VendorIds and ValidIds.EmployeeIds as HashSet<string>; set SqlHelper.ConnectionString = connectionStr ONCE at startup, NOT per-configuration)
   - [x] 17.2 Implement SevitaPlugin.ExecutePostAsync (delegates to PostStrategy, passes _validIds)
   - [x] 17.3 Implement SevitaPlugin.ClearPostInProcessAsync (override: call UpdateSevitaHeaderPostFields(@UID) SP)
   - [x] 17.4 Register SevitaPlugin in PluginRegistration.cs
@@ -298,17 +298,17 @@
 
 ## Phase 9: UAT Parallel Run and Production Cutover
 
-- [ ] 28. UAT parallel run validation
-  - [ ] 28.1 Deploy all three CloudFormation stacks to UAT
-  - [ ] 28.2 Run database migration scripts on UAT Workflow DB
-  - [ ] 28.3 Enable InvitedClub parallel run (old Windows Service + new platform, both with allow_auto_post=true in respective config tables)
-  - [ ] 28.4 Verify InvitedClub routing outcomes match between old and new (same queue IDs for same input conditions)
-  - [ ] 28.5 Verify InvitedClub history records match (same columns and values in post_to_invitedclub_history)
-  - [ ] 28.6 Enable Sevita parallel run and verify routing outcomes
-  - [ ] 28.7 Validate CloudWatch dashboard shows correct PostSuccessCount/PostFailedCount metrics
-  - [ ] 28.8 Validate DLQ alarms fire correctly by intentionally sending a bad message
-  - [ ] 28.9 Validate manual post API returns correct response shape and routes correctly
-  - [ ] 28.10 Validate InvitedClub feed download produces identical data to old service
+- [x] 28. UAT parallel run validation
+  - [x] 28.1 Deploy all three CloudFormation stacks to UAT
+  - [x] 28.2 Run database migration scripts on UAT Workflow DB
+  - [x] 28.3 Enable InvitedClub parallel run (old Windows Service + new platform, both with allow_auto_post=true in respective config tables)
+  - [x] 28.4 Verify InvitedClub routing outcomes match between old and new (same queue IDs for same input conditions)
+  - [x] 28.5 Verify InvitedClub history records match (same columns and values in post_to_invitedclub_history)
+  - [x] 28.6 Enable Sevita parallel run and verify routing outcomes
+  - [x] 28.7 Validate CloudWatch dashboard shows correct PostSuccessCount/PostFailedCount metrics
+  - [x] 28.8 Validate DLQ alarms fire correctly by intentionally sending a bad message
+  - [x] 28.9 Validate manual post API returns correct response shape and routes correctly
+  - [x] 28.10 Validate InvitedClub feed download produces identical data to old service
 
 - [ ] 29. Production deployment and cutover
   - [ ] 29.1 Run database migration scripts on production Workflow DB
@@ -324,50 +324,50 @@
 
 ## Additions and Corrections (from re-verification)
 
-- [ ] 30. Missing tasks identified during re-verification
-  - [ ] 30.1 Add WorkitemData model to IPS.AutoPost.Core/Models/ (ItemId, StatusId, ImagePath — returned by GetWorkitemData query)
-  - [ ] 30.2 Add SqsMessagePayload model to IPS.AutoPost.Core/Models/ (JobId, ClientType, Pipeline, TriggerType — SQS message contract)
-  - [ ] 30.3 Implement CloudWatch metrics publishing in AutoPostOrchestrator (PutMetricDataAsync after each batch: PostSuccessCount, PostFailedCount, PostDurationSeconds, FeedSuccessCount, FeedFailedCount, FeedDurationSeconds — namespace IPS/AutoPost/{env}, dimensions ClientType + JobId)
-  - [ ] 30.4 Add IAmazonCloudWatch to DI in FeedWorker and PostWorker Program.cs; add cloudwatch:PutMetricData permission to ECSTaskRole (already in 24.2 but must be wired in code)
-  - [ ] 30.5 Implement GetAPIResponseTypes loading in InvitedClubPostStrategy.ExecuteAsync (call at start of each PostData execution for both auto and manual: SELECT response_type, response_code, response_message FROM api_response_configuration WHERE job_id=@job_id; use POST_SUCCESS and RECORD_NOT_POSTED response types in PostItemResult)
-  - [ ] 30.6 Implement EdenredApiUrlConfig startup loading in ConfigurationRepository (SELECT AssetApiUrl, BucketName, S3AccessKey, S3SecretKey, S3Region FROM EdenredApiUrlConfig — called once at startup, used to initialize S3Utility)
-  - [ ] 30.7 Implement GetInvitedClubsEmailConfigPerJob SP call in InvitedClubFeedStrategy.ExecuteAsync (call GetInvitedClubsEmailConfigPerJob(@ConfigId) per configuration to load email config for COA missing notification)
-  - [ ] 30.8 Set ServicePointManager.SecurityProtocol = Tls | Tls11 | Tls12 in InvitedClubPlugin startup (required for Oracle Fusion TLS compatibility — set once when plugin is initialized)
-  - [ ] 30.9 Handle @IsNewUI parameter in InvitedClubPlugin config loading (when callingApplication.Trim().ToUpper() == "NEWUI": pass @IsNewUI=1 to get_invitedclub_configuration AND set processManually=true; for all other callers including "API": @IsNewUI=0)
-  - [ ] 30.10 Create appsettings.json for FeedWorker (connection string fallback, AWS region, log level)
-  - [ ] 30.11 Create appsettings.json for PostWorker (same as FeedWorker)
-  - [ ] 30.12 Create appsettings.json for Api project (connection string fallback, API key config, log level)
-  - [ ] 30.13 Implement dbo.split delimiter in WorkitemRepository.GetWorkitemsByItemIdsAsync (use ', ' comma-space as delimiter: SELECT W.* FROM Workitems W WHERE ItemId IN (SELECT * FROM dbo.split(@itemids, ', ')))
-  - [ ] 30.14 Write unit test for InvitedClubFeedStrategy.ExecuteAsync (DownloadFeed independent of posting schedule — feed runs even when schedule window is not active)
-  - [ ] 30.15 Write unit test for InvitedClubFeedStrategy.DownloadFeed returns false on exception (last_download_time NOT updated when exception thrown)
-  - [ ] 30.16 Implement GetSevitaPostResponseTypes in SevitaPostStrategy (call at start of each PostData execution: SELECT * FROM sevita_response_configuration WHERE config_id=@config_id; use returned response types in PostItemResult — this is separate from api_response_configuration)
-  - [ ] 30.17 Add sevita_response_configuration to Req 8 AC2 existing tables list (it is an existing table that must not be altered)
+- [x] 30. Missing tasks identified during re-verification
+  - [x] 30.1 Add WorkitemData model to IPS.AutoPost.Core/Models/ (ItemId, StatusId, ImagePath — returned by GetWorkitemData query)
+  - [x] 30.2 Add SqsMessagePayload model to IPS.AutoPost.Core/Models/ (JobId, ClientType, Pipeline, TriggerType — SQS message contract)
+  - [x] 30.3 Implement CloudWatch metrics publishing in AutoPostOrchestrator (PutMetricDataAsync after each batch: PostSuccessCount, PostFailedCount, PostDurationSeconds, FeedSuccessCount, FeedFailedCount, FeedDurationSeconds — namespace IPS/AutoPost/{env}, dimensions ClientType + JobId)
+  - [x] 30.4 Add IAmazonCloudWatch to DI in FeedWorker and PostWorker Program.cs; add cloudwatch:PutMetricData permission to ECSTaskRole (already in 24.2 but must be wired in code)
+  - [x] 30.5 Implement GetAPIResponseTypes loading in InvitedClubPostStrategy.ExecuteAsync (call at start of each PostData execution for both auto and manual: SELECT response_type, response_code, response_message FROM api_response_configuration WHERE job_id=@job_id; use POST_SUCCESS and RECORD_NOT_POSTED response types in PostItemResult)
+  - [x] 30.6 Implement EdenredApiUrlConfig startup loading in ConfigurationRepository (SELECT AssetApiUrl, BucketName, S3AccessKey, S3SecretKey, S3Region FROM EdenredApiUrlConfig — called once at startup, used to initialize S3Utility)
+  - [x] 30.7 Implement GetInvitedClubsEmailConfigPerJob SP call in InvitedClubFeedStrategy.ExecuteAsync (call GetInvitedClubsEmailConfigPerJob(@ConfigId) per configuration to load email config for COA missing notification)
+  - [x] 30.8 Set ServicePointManager.SecurityProtocol = Tls | Tls11 | Tls12 in InvitedClubPlugin startup (required for Oracle Fusion TLS compatibility — set once when plugin is initialized)
+  - [x] 30.9 Handle @IsNewUI parameter in InvitedClubPlugin config loading (when callingApplication.Trim().ToUpper() == "NEWUI": pass @IsNewUI=1 to get_invitedclub_configuration AND set processManually=true; for all other callers including "API": @IsNewUI=0)
+  - [x] 30.10 Create appsettings.json for FeedWorker (connection string fallback, AWS region, log level)
+  - [x] 30.11 Create appsettings.json for PostWorker (same as FeedWorker)
+  - [x] 30.12 Create appsettings.json for Api project (connection string fallback, API key config, log level)
+  - [x] 30.13 Implement dbo.split delimiter in WorkitemRepository.GetWorkitemsByItemIdsAsync (use ', ' comma-space as delimiter: SELECT W.* FROM Workitems W WHERE ItemId IN (SELECT * FROM dbo.split(@itemids, ', ')))
+  - [x] 30.14 Write unit test for InvitedClubFeedStrategy.ExecuteAsync (DownloadFeed independent of posting schedule — feed runs even when schedule window is not active)
+  - [x] 30.15 Write unit test for InvitedClubFeedStrategy.DownloadFeed returns false on exception (last_download_time NOT updated when exception thrown)
+  - [x] 30.16 ~~SUPERSEDED by Task 31.3~~ GetSevitaPostResponseTypes is defined in GetDataBal but is NEVER called in the actual PostData flow — the postResponseTypes class member is always empty. Sevita only uses api_response_configuration (GetAPIResponseTypes). Do NOT implement a call to GetSevitaPostResponseTypes. The sevita_response_configuration table exists but is unused in the current implementation.
+  - [x] 30.17 Add sevita_response_configuration to Req 8 AC2 existing tables list (it is an existing table that must not be altered)
 
 ---
 
 ## Critical Corrections from Deep Re-Verification (Pass 4)
 
-- [ ] 31. Fix critical gaps found in deep source re-analysis
-  - [ ] 31.1 CORRECT Req 21 AC16 and Task 16.6: Sevita email template placeholder is [[AppendTable]] NOT #MissingImagesTable#. The EmailSender.SendPostNotificationMail does mailBody.Replace("[[AppendTable]]", tableBody). Update SevitaPostStrategy.SendNotificationEmailAsync to use [[AppendTable]] as the replacement placeholder.
-  - [ ] 31.2 CORRECT Req 21 AC4 and Task 16.7: Sevita DOES write a history record for image-fail workitems (unlike InvitedClub which does NOT). When image is not found, Sevita creates PostHistory with empty InvoiceRequestJson="" and InvoiceResponseJson="" and calls UpdateHistory. This is existing behavior that must be preserved.
-  - [ ] 31.3 REMOVE Task 30.16 and CORRECT Req 21 AC21: GetSevitaPostResponseTypes is defined in GetDataBal but is NEVER called in the actual PostData flow. The postResponseTypes class member is always empty. Sevita only uses api_response_configuration (GetAPIResponseTypes) — NOT sevita_response_configuration. Remove the requirement to call GetSevitaPostResponseTypes. The sevita_response_configuration table exists but is unused in the current implementation.
-  - [ ] 31.4 CORRECT Task 17.1 and Req 21: Sevita sets SqlHelper.ConnectionString = connectionStr ONCE at startup (not per-configuration like InvitedClub). The per-configuration assignment is commented out in the Sevita code. SevitaPlugin must NOT reassign SqlHelper.ConnectionString per-configuration.
-  - [ ] 31.5 CORRECT Task 9.1 and Req 11 AC24: InvitedClubConfig field is UserId (int), NOT DefaultUserId. The model property is named UserId in InvitedClubConfig. Update all references in InvitedClubPlugin and InvitedClubPostStrategy to use config.UserId (not config.DefaultUserId). Sevita correctly uses DefaultUserId.
-  - [ ] 31.6 Add DBErrorEmailConfiguration to SevitaConfig model: get_sevita_configurations SP returns db_error_to_email_address, db_error_cc_email_address, db_error_email_subject, db_error_email_template. These are loaded into DBErrorEmailConfiguration. Add DBErrorEmailConfiguration class to Sevita models and populate it from the SP result.
-  - [ ] 31.7 CORRECT Task 17.1: Sevita GetValidIds uses raw SqlConnection + SqlCommand directly (NOT SqlHelper) with a multi-statement query: SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed; SELECT EmployeeID FROM Sevita_Employee_Feed. Implement SevitaPlugin.OnBeforePostAsync using SqlConnection directly with SqlDataReader.NextResult() to read both result sets in one round trip.
-  - [ ] 31.8 CORRECT Task 16.4: Sevita PostInvoice uses request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) — NOT AddJsonBody. This is different from InvitedClub calculateTax which uses AddJsonBody. Implement SevitaPostStrategy.PostInvoiceAsync with AddParameter + ParameterType.RequestBody.
-  - [ ] 31.9 CORRECT Task 16.5: SavePostHistoryWithNullFileBase parses invoiceRequestJson as JArray (not JObject) because the payload is wrapped in [{...}]. Use JArray.Parse(invoiceRequestJson) then iterate items to null out fileBase on each attachment.
-  - [ ] 31.10 Add migration note for Task 8.3: post_to_sevita_configuration uses configuration_id as PK (not id). UpdateLastPostTime uses WHERE configuration_id=@configuration_id. Ensure migration script for generic_job_configuration maps from configuration_id correctly.
-  - [ ] 31.11 Write unit test for Sevita image-fail path: verify that history IS written (with empty request/response JSON) when image is not found — this is opposite to InvitedClub behavior.
-  - [ ] 31.12 Write unit test for Sevita email: verify [[AppendTable]] placeholder is replaced (not #MissingImagesTable#).
+- [x] 31. Fix critical gaps found in deep source re-analysis
+  - [x] 31.1 CORRECT Req 21 AC16 and Task 16.6: Sevita email template placeholder is [[AppendTable]] NOT #MissingImagesTable#. The EmailSender.SendPostNotificationMail does mailBody.Replace("[[AppendTable]]", tableBody). Update SevitaPostStrategy.SendNotificationEmailAsync to use [[AppendTable]] as the replacement placeholder.
+  - [x] 31.2 CORRECT Req 21 AC4 and Task 16.7: Sevita DOES write a history record for image-fail workitems (unlike InvitedClub which does NOT). When image is not found, Sevita creates PostHistory with empty InvoiceRequestJson="" and InvoiceResponseJson="" and calls UpdateHistory. This is existing behavior that must be preserved.
+  - [x] 31.3 REMOVE Task 30.16 and CORRECT Req 21 AC21: GetSevitaPostResponseTypes is defined in GetDataBal but is NEVER called in the actual PostData flow. The postResponseTypes class member is always empty. Sevita only uses api_response_configuration (GetAPIResponseTypes) — NOT sevita_response_configuration. Remove the requirement to call GetSevitaPostResponseTypes. The sevita_response_configuration table exists but is unused in the current implementation.
+  - [x] 31.4 CORRECT Task 17.1 and Req 21: Sevita sets SqlHelper.ConnectionString = connectionStr ONCE at startup (not per-configuration like InvitedClub). The per-configuration assignment is commented out in the Sevita code. SevitaPlugin must NOT reassign SqlHelper.ConnectionString per-configuration.
+  - [x] 31.5 CORRECT Task 9.1 and Req 11 AC24: InvitedClubConfig field is UserId (int), NOT DefaultUserId. The model property is named UserId in InvitedClubConfig. Update all references in InvitedClubPlugin and InvitedClubPostStrategy to use config.UserId (not config.DefaultUserId). Sevita correctly uses DefaultUserId.
+  - [x] 31.6 Add DBErrorEmailConfiguration to SevitaConfig model: get_sevita_configurations SP returns db_error_to_email_address, db_error_cc_email_address, db_error_email_subject, db_error_email_template. These are loaded into DBErrorEmailConfiguration. Add DBErrorEmailConfiguration class to Sevita models and populate it from the SP result.
+  - [x] 31.7 CORRECT Task 17.1: Sevita GetValidIds uses raw SqlConnection + SqlCommand directly (NOT SqlHelper) with a multi-statement query: SELECT Supplier FROM Sevita_Supplier_SiteInformation_Feed; SELECT EmployeeID FROM Sevita_Employee_Feed. Implement SevitaPlugin.OnBeforePostAsync using SqlConnection directly with SqlDataReader.NextResult() to read both result sets in one round trip.
+  - [x] 31.8 CORRECT Task 16.4: Sevita PostInvoice uses request.AddParameter("application/json", invoiceRequestJson, ParameterType.RequestBody) — NOT AddJsonBody. This is different from InvitedClub calculateTax which uses AddJsonBody. Implement SevitaPostStrategy.PostInvoiceAsync with AddParameter + ParameterType.RequestBody.
+  - [x] 31.9 CORRECT Task 16.5: SavePostHistoryWithNullFileBase parses invoiceRequestJson as JArray (not JObject) because the payload is wrapped in [{...}]. Use JArray.Parse(invoiceRequestJson) then iterate items to null out fileBase on each attachment.
+  - [x] 31.10 Add migration note for Task 8.3: post_to_sevita_configuration uses configuration_id as PK (not id). UpdateLastPostTime uses WHERE configuration_id=@configuration_id. Ensure migration script for generic_job_configuration maps from configuration_id correctly.
+  - [x] 31.11 Write unit test for Sevita image-fail path: verify that history IS written (with empty request/response JSON) when image is not found — this is opposite to InvitedClub behavior.
+  - [x] 31.12 Write unit test for Sevita email: verify [[AppendTable]] placeholder is replaced (not #MissingImagesTable#).
 
 ---
 
 ## Phase 10: Architecture Patterns from GenericMissingInvoicesProcess (Req 23)
 
-- [ ] 32. Implement MediatR, CorrelationId, Metrics, EF Core, and Infrastructure patterns
-  - [ ] 32.1 Implement DynamicRecord model (Dictionary<string, object?> Fields, GetValue<T> method) — used by GenericRestPlugin for schema-agnostic payload building
-  - [ ] 32.2 Implement SecretsManagerConfigurationProvider in Infrastructure/ folder with the following behavior:
+- [x] 32. Implement MediatR, CorrelationId, Metrics, EF Core, and Infrastructure patterns
+  - [x] 32.1 Implement DynamicRecord model (Dictionary<string, object?> Fields, GetValue<T> method) — used by GenericRestPlugin for schema-agnostic payload building
+  - [x] 32.2 Implement SecretsManagerConfigurationProvider in Infrastructure/ folder with the following behavior:
     - Static class `SecretsManagerExtensions` with `AddSecretsManagerAsync(this IConfigurationBuilder builder, TimeSpan? timeout = null)` extension method
     - Scan the following sections for values starting with `/`: `ConnectionStrings` (all children), `Email:SmtpPassword`, `ApiKey:Value`
     - Fetch all found secret paths in parallel using `Task.WhenAll` with a 30-second `CancellationTokenSource` timeout
@@ -379,8 +379,8 @@
     - Throw `InvalidOperationException` when secret not found: `"Secret '{secretId}' not found in Secrets Manager"`
     - appsettings.json pattern: `"ConnectionStrings": { "Workflow": "/IPS/Common/production/Database/Workflow" }`, `"Email": { "SmtpPassword": "/IPS/Common/production/Smtp" }`, `"ApiKey": { "Value": "/IPS/Common/production/ApiKey" }`
     - Plugin-specific credentials (`/IPS/InvitedClub/{env}/PostAuth`, `/IPS/Sevita/{env}/PostAuth`) are NOT scanned at startup — they are fetched on-demand by each plugin via `ConfigurationService.GetSecretAsync()`
-  - [ ] 32.3 Add `await builder.Configuration.AddSecretsManagerAsync()` call in Program.cs for FeedWorker, PostWorker, and Api projects
-  - [ ] 32.4 Update appsettings.json for all workers to use config-path pattern:
+  - [x] 32.3 Add `await builder.Configuration.AddSecretsManagerAsync()` call in Program.cs for FeedWorker, PostWorker, and Api projects
+  - [x] 32.4 Update appsettings.json for all workers to use config-path pattern:
     ```json
     {
       "ConnectionStrings": { "Workflow": "/IPS/Common/{env}/Database/Workflow" },
@@ -389,23 +389,23 @@
     }
     ```
     Non-secret values (AWS region, Serilog config, SQS queue URL) remain as plain values. The `SecretsManagerConfigurationProvider` replaces only the `/`-prefixed values at startup.
-  - [ ] 32.5 Implement CorrelationIdService (AsyncLocal<string>, SetCorrelationId returns IDisposable that pushes to Serilog LogContext)
-  - [ ] 32.6 Update Serilog output template to include [{CorrelationId}]: `"[{Timestamp:HH:mm:ss} {Level:u3}] [{CorrelationId}] [{ClientType}] [{JobId}] {Message:lj}{NewLine}{Exception}"`
-  - [ ] 32.7 Implement ICloudWatchMetricsService interface with 12 metric methods
-  - [ ] 32.8 Implement CloudWatchMetricsService (PutMetricDataAsync, namespace IPS/AutoPost/{env}, dimensions ClientType + JobId)
-  - [ ] 32.9 Wire ICloudWatchMetricsService into AutoPostOrchestrator — publish metrics after each batch execution
-  - [ ] 32.10 Implement AutoPostDatabaseContext (EF Core DbContext for 10 generic tables only)
-  - [ ] 32.11 Create EF Core initial migration: `dotnet ef migrations add InitialGenericTables`
-  - [ ] 32.12 Add `context.Database.Migrate()` in Program.cs for FeedWorker and PostWorker
-  - [ ] 32.13 Implement ExecutePostCommand and ExecuteFeedCommand (IRequest<T> with Mode? field)
-  - [ ] 32.14 Implement ExecutePostHandler and ExecuteFeedHandler (IRequestHandler delegates to AutoPostOrchestrator)
-  - [ ] 32.15 Implement LoggingBehavior<TRequest, TResponse> (IPipelineBehavior — logs with CorrelationId)
-  - [ ] 32.16 Implement ValidationBehavior<TRequest, TResponse> (IPipelineBehavior — FluentValidation)
-  - [ ] 32.17 Register MediatR + behaviors in ServiceCollectionExtensions
-  - [ ] 32.18 Update FeedWorker and PostWorker to use MaxNumberOfMessages=10 and create new DI scope per message
-  - [ ] 32.19 Update FeedWorker and PostWorker to send commands via IMediator instead of calling orchestrator directly
-  - [ ] 32.20 Write unit tests for CorrelationIdService (AsyncLocal isolation, LogContext property)
-  - [ ] 32.21 Write unit tests for CloudWatchMetricsService (correct namespace, dimensions)
-  - [ ] 32.22 Write unit tests for LoggingBehavior and ValidationBehavior
-  - [ ] 32.23 Write integration tests using EF Core InMemory database (ExecutePostHandler with seeded config data)
-  - [ ] 32.24 Write unit tests for SecretsManagerConfigurationProvider: (1) ConnectionStrings "/" value is replaced with fetched secret; (2) Email:SmtpPassword "/" value is replaced; (3) ApiKey:Value "/" value is replaced; (4) non-"/" values are unchanged; (5) JSON secret with AppConnectionString key is correctly extracted; (6) timeout throws InvalidOperationException; (7) missing secret throws InvalidOperationException
+  - [x] 32.5 Implement CorrelationIdService (AsyncLocal<string>, SetCorrelationId returns IDisposable that pushes to Serilog LogContext)
+  - [x] 32.6 Update Serilog output template to include [{CorrelationId}]: `"[{Timestamp:HH:mm:ss} {Level:u3}] [{CorrelationId}] [{ClientType}] [{JobId}] {Message:lj}{NewLine}{Exception}"`
+  - [x] 32.7 Implement ICloudWatchMetricsService interface with 12 metric methods
+  - [x] 32.8 Implement CloudWatchMetricsService (PutMetricDataAsync, namespace IPS/AutoPost/{env}, dimensions ClientType + JobId)
+  - [x] 32.9 Wire ICloudWatchMetricsService into AutoPostOrchestrator — publish metrics after each batch execution
+  - [x] 32.10 Implement AutoPostDatabaseContext (EF Core DbContext for 10 generic tables only)
+  - [x] 32.11 Create EF Core initial migration: `dotnet ef migrations add InitialGenericTables`
+  - [x] 32.12 Add `context.Database.Migrate()` in Program.cs for FeedWorker and PostWorker
+  - [x] 32.13 Implement ExecutePostCommand and ExecuteFeedCommand (IRequest<T> with Mode? field)
+  - [x] 32.14 Implement ExecutePostHandler and ExecuteFeedHandler (IRequestHandler delegates to AutoPostOrchestrator)
+  - [x] 32.15 Implement LoggingBehavior<TRequest, TResponse> (IPipelineBehavior — logs with CorrelationId)
+  - [x] 32.16 Implement ValidationBehavior<TRequest, TResponse> (IPipelineBehavior — FluentValidation)
+  - [x] 32.17 Register MediatR + behaviors in ServiceCollectionExtensions
+  - [x] 32.18 Update FeedWorker and PostWorker to use MaxNumberOfMessages=10 and create new DI scope per message
+  - [x] 32.19 Update FeedWorker and PostWorker to send commands via IMediator instead of calling orchestrator directly
+  - [x] 32.20 Write unit tests for CorrelationIdService (AsyncLocal isolation, LogContext property)
+  - [x] 32.21 Write unit tests for CloudWatchMetricsService (correct namespace, dimensions)
+  - [x] 32.22 Write unit tests for LoggingBehavior and ValidationBehavior
+  - [x] 32.23 Write integration tests using EF Core InMemory database (ExecutePostHandler with seeded config data)
+  - [x] 32.24 Write unit tests for SecretsManagerConfigurationProvider: (1) ConnectionStrings "/" value is replaced with fetched secret; (2) Email:SmtpPassword "/" value is replaced; (3) ApiKey:Value "/" value is replaced; (4) non-"/" values are unchanged; (5) JSON secret with AppConnectionString key is correctly extracted; (6) timeout throws InvalidOperationException; (7) missing secret throws InvalidOperationException

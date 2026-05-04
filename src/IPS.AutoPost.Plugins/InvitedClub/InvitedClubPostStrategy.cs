@@ -425,12 +425,9 @@ public class InvitedClubPostStrategy
         var result = new PostBatchResult();
         var failedImageItems = new List<(long ItemId, string ImagePath)>();
 
-        // Load API response types for manual posts (used to return structured response codes)
-        List<APIResponseType> apiResponseTypes = new();
-        if (context.ProcessManually)
-        {
-            apiResponseTypes = await _db.GetApiResponseTypesAsync(config.JobId, ct);
-        }
+        // Load API response types for all executions (both auto and manual) — task 30.5
+        // Used to return structured response codes in PostItemResult.
+        var apiResponseTypes = await _db.GetApiResponseTypesAsync(config.JobId, ct);
 
         // Parse item IDs to process — each item's header+detail data is loaded
         // individually inside ProcessWorkitemAsync via GetHeaderAndDetailDataAsync.

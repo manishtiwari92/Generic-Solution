@@ -1,3 +1,4 @@
+using Amazon;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
 using Microsoft.Extensions.Configuration;
@@ -26,6 +27,14 @@ namespace IPS.AutoPost.Core.Infrastructure;
 /// secret. Otherwise the raw <c>SecretString</c> is used.
 /// </para>
 /// <para>
+/// Region resolution order:
+/// <list type="number">
+///   <item><c>AWS_DEFAULT_REGION</c> environment variable</item>
+///   <item><c>AWS_REGION</c> environment variable</item>
+///   <item>Fallback: <c>"us-east-1"</c></item>
+/// </list>
+/// </para>
+/// <para>
 /// Usage in <c>Program.cs</c>:
 /// <code>
 /// await builder.Configuration.AddSecretsManagerAsync();
@@ -50,9 +59,9 @@ public static class SecretsManagerConfigurationProvider
     private const string AppConnectionStringProperty = "AppConnectionString";
 
     // -----------------------------------------------------------------------
-    // Timeout for each individual Secrets Manager call
+    // Timeout for the entire parallel fetch operation
     // -----------------------------------------------------------------------
-    private static readonly TimeSpan SecretFetchTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Scans the current configuration for "/" prefixed values in the well-known sections,
@@ -64,12 +73,21 @@ public static class SecretsManagerConfigurationProvider
     /// <param name="secretsManager">
     /// Optional <see cref="IAmazonSecretsManager"/> client. When <c>null</c> a default
     /// <see cref="AmazonSecretsManagerClient"/> is created using the ambient AWS credentials
-    /// (IAM role, environment variables, or <c>~/.aws/credentials</c>).
+    /// (IAM role, environment variables, or <c>~/.aws/credentials</c>) and the region
+    /// resolved from <c>AWS_DEFAULT_REGION</c> → <c>AWS_REGION</c> → <c>"us-east-1"</c>.
+    /// </param>
+    /// <param name="timeout">
+    /// Optional timeout for the entire parallel fetch. Defaults to 30 seconds.
     /// </param>
     /// <returns>A <see cref="Task"/> that completes when all secrets have been resolved.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the 30-second timeout is exceeded or when a secret path is not found
+    /// in Secrets Manager.
+    /// </exception>
     public static async Task AddSecretsManagerAsync(
         this IConfigurationBuilder builder,
-        IAmazonSecretsManager? secretsManager = null)
+        IAmazonSecretsManager? secretsManager = null,
+        TimeSpan? timeout = null)
     {
         // Build a temporary IConfiguration snapshot so we can read current values
         var config = builder.Build();
@@ -82,15 +100,32 @@ public static class SecretsManagerConfigurationProvider
 
         // Create a default client if none was injected (uses ambient AWS credentials)
         var ownsClient = secretsManager is null;
-        secretsManager ??= new AmazonSecretsManagerClient();
+        if (ownsClient)
+        {
+            var region = ResolveRegion();
+            secretsManager = new AmazonSecretsManagerClient(RegionEndpoint.GetBySystemName(region));
+        }
+
+        var effectiveTimeout = timeout ?? DefaultTimeout;
 
         try
         {
-            // Fetch all secrets in parallel, each with its own 30-second timeout
-            var fetchTasks = secretPaths.Select(kvp =>
-                FetchSecretAsync(secretsManager, kvp.Key, kvp.Value));
+            using var cts = new CancellationTokenSource(effectiveTimeout);
 
-            var resolvedPairs = await Task.WhenAll(fetchTasks);
+            // Fetch all secrets in parallel with a shared timeout CancellationToken
+            var fetchTasks = secretPaths.Select(kvp =>
+                FetchSecretAsync(secretsManager!, kvp.Key, kvp.Value, cts.Token));
+
+            KeyValuePair<string, string?>[] resolvedPairs;
+            try
+            {
+                resolvedPairs = await Task.WhenAll(fetchTasks);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                throw new InvalidOperationException(
+                    $"Secrets Manager request timed out after {(int)effectiveTimeout.TotalSeconds}s");
+            }
 
             // Filter out any entries that failed to resolve (null value)
             var resolvedValues = resolvedPairs
@@ -104,7 +139,7 @@ public static class SecretsManagerConfigurationProvider
         {
             // Dispose the client only if we created it
             if (ownsClient)
-                secretsManager.Dispose();
+                secretsManager!.Dispose();
         }
     }
 
@@ -113,10 +148,27 @@ public static class SecretsManagerConfigurationProvider
     // -----------------------------------------------------------------------
 
     /// <summary>
+    /// Resolves the AWS region from environment variables.
+    /// Priority: <c>AWS_DEFAULT_REGION</c> → <c>AWS_REGION</c> → <c>"us-east-1"</c>.
+    /// </summary>
+    public static string ResolveRegion()
+    {
+        var region = Environment.GetEnvironmentVariable("AWS_DEFAULT_REGION");
+        if (!string.IsNullOrWhiteSpace(region))
+            return region;
+
+        region = Environment.GetEnvironmentVariable("AWS_REGION");
+        if (!string.IsNullOrWhiteSpace(region))
+            return region;
+
+        return "us-east-1";
+    }
+
+    /// <summary>
     /// Walks the current configuration snapshot and returns a dictionary of
     /// <c>configKey → secretPath</c> for every value that starts with "/".
     /// </summary>
-    private static Dictionary<string, string> CollectSecretPaths(IConfiguration config)
+    public static Dictionary<string, string> CollectSecretPaths(IConfiguration config)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -146,29 +198,37 @@ public static class SecretsManagerConfigurationProvider
 
     /// <summary>
     /// Fetches a single secret from AWS Secrets Manager and returns a
-    /// <c>(configKey, resolvedValue)</c> pair. Returns <c>(configKey, null)</c> on failure.
+    /// <c>(configKey, resolvedValue)</c> pair.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the secret is not found in Secrets Manager.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Propagated when the shared <paramref name="ct"/> is cancelled (timeout).
+    /// </exception>
     private static async Task<KeyValuePair<string, string?>> FetchSecretAsync(
         IAmazonSecretsManager secretsManager,
         string configKey,
-        string secretPath)
+        string secretPath,
+        CancellationToken ct)
     {
-        using var cts = new CancellationTokenSource(SecretFetchTimeout);
-
         try
         {
             var request = new GetSecretValueRequest { SecretId = secretPath };
-            var response = await secretsManager.GetSecretValueAsync(request, cts.Token);
+            var response = await secretsManager.GetSecretValueAsync(request, ct);
 
             var resolvedValue = ExtractSecretValue(response.SecretString);
             return new KeyValuePair<string, string?>(configKey, resolvedValue);
         }
+        catch (ResourceNotFoundException)
+        {
+            throw new InvalidOperationException(
+                $"Secret '{secretPath}' not found in Secrets Manager");
+        }
         catch (OperationCanceledException)
         {
-            // Timeout — log-friendly: surface as a warning-level exception message
-            throw new TimeoutException(
-                $"Timed out after {SecretFetchTimeout.TotalSeconds}s fetching secret '{secretPath}' " +
-                $"for config key '{configKey}'.");
+            // Re-throw so the caller's cts.IsCancellationRequested check fires
+            throw;
         }
         catch (Exception ex)
         {
@@ -188,7 +248,7 @@ public static class SecretsManagerConfigurationProvider
     ///   <item>Otherwise the raw <paramref name="secretString"/> is returned as-is.</item>
     /// </list>
     /// </summary>
-    private static string? ExtractSecretValue(string? secretString)
+    public static string? ExtractSecretValue(string? secretString)
     {
         if (string.IsNullOrWhiteSpace(secretString))
             return secretString;

@@ -303,6 +303,120 @@ public class InvitedClubFeedStrategyTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // 30.14 Test: Feed runs independently of posting schedule
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Task 30.14: Verifies that <see cref="InvitedClubFeedStrategy.ExecuteAsync"/> runs
+    /// regardless of whether the posting schedule window is active.
+    /// The feed strategy has no schedule-window check — it always executes when called.
+    /// The schedule check lives in <c>AutoPostOrchestrator.RunScheduledFeedAsync</c>,
+    /// not in the plugin strategy itself.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_AlwaysRuns_IndependentOfPostingSchedule()
+    {
+        // Arrange: set up a minimal successful feed run
+        // Supplier endpoint returns one page with no items
+        _server
+            .Given(Request.Create()
+                .WithPath("/suppliers")
+                .UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(BuildEmptyPageJson()));
+
+        // COA endpoint returns one page with no items
+        _server
+            .Given(Request.Create()
+                .WithPath("/accountCombinationsLOV")
+                .UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(BuildCoaPageJson(hasMore: false, count: 0)));
+
+        // DB: all table counts return 0 (initial call)
+        _dbMock
+            .Setup(db => db.GetTableCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        _dbMock
+            .Setup(db => db.TruncateTableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _dbMock
+            .Setup(db => db.BulkCopyAsync(It.IsAny<string>(), It.IsAny<DataTable>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _dbMock
+            .Setup(db => db.ExecuteNonQuerySpAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _dbMock
+            .Setup(db => db.ExecuteUpdateLastDownloadTimeAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _dbMock
+            .Setup(db => db.GetSupplierDataToExportAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataSet());
+        _dbMock
+            .Setup(db => db.GetMissingCOAIdsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string>());
+
+        var feedContext = new FeedContext
+        {
+            TriggerType = "Scheduled",
+            S3Config = new EdenredApiUrlConfig()
+        };
+
+        // Act: call ExecuteAsync directly — no schedule check happens inside the strategy
+        var result = await _strategy.ExecuteAsync(_config, feedContext, CancellationToken.None);
+
+        // Assert: feed ran and returned a result (not NotApplicable)
+        result.IsApplicable.Should().BeTrue();
+        result.Success.Should().BeTrue();
+    }
+
+    // -----------------------------------------------------------------------
+    // 30.15 Test: Exception during feed does NOT update last_download_time
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Task 30.15: Verifies that when an exception is thrown during feed download,
+    /// <see cref="InvitedClubFeedStrategy.ExecuteAsync"/> returns <see cref="FeedResult.Failed"/>
+    /// and does NOT call <c>ExecuteUpdateLastDownloadTimeAsync</c>.
+    /// The <c>last_download_time</c> update is the responsibility of
+    /// <c>AutoPostOrchestrator.RunScheduledFeedAsync</c>, which only updates it
+    /// when <c>result.Success == true</c>.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenExceptionThrown_ReturnsFailed_AndDoesNotUpdateLastDownloadTime()
+    {
+        // Arrange: make the DB table count throw to simulate a failure mid-feed
+        _dbMock
+            .Setup(db => db.GetTableCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Simulated DB failure during feed"));
+
+        var feedContext = new FeedContext
+        {
+            TriggerType = "Scheduled",
+            S3Config = new EdenredApiUrlConfig()
+        };
+
+        // Act
+        var result = await _strategy.ExecuteAsync(_config, feedContext, CancellationToken.None);
+
+        // Assert: result is Failed (not Success)
+        result.IsApplicable.Should().BeTrue();
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Simulated DB failure during feed");
+
+        // Assert: ExecuteUpdateLastDownloadTimeAsync was NEVER called
+        // (last_download_time must not be updated on failure)
+        _dbMock.Verify(
+            db => db.ExecuteUpdateLastDownloadTimeAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "last_download_time must NOT be updated when feed download throws an exception");
+    }
+
+    // -----------------------------------------------------------------------
     // Helper methods
     // -----------------------------------------------------------------------
 
@@ -402,5 +516,21 @@ public class InvitedClubFeedStrategyTests : IDisposable
             "");
 
         return dt;
+    }
+
+    /// <summary>
+    /// Builds a JSON response body representing an empty page (no items, hasMore=false).
+    /// Used to simulate API endpoints that return no data.
+    /// </summary>
+    private static string BuildEmptyPageJson()
+    {
+        return JsonSerializer.Serialize(new
+        {
+            items = Array.Empty<object>(),
+            count = 0,
+            hasMore = false,
+            limit = 500,
+            offset = 0
+        });
     }
 }

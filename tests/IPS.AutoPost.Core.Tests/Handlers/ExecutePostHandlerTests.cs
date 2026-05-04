@@ -4,8 +4,8 @@ using IPS.AutoPost.Core.Engine;
 using IPS.AutoPost.Core.Handlers;
 using IPS.AutoPost.Core.Interfaces;
 using IPS.AutoPost.Core.Models;
-using Moq;
 using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace IPS.AutoPost.Core.Tests.Handlers;
 
@@ -34,6 +34,7 @@ public class ExecutePostHandlerTests
             Mock.Of<IScheduleRepository>(),
             new PluginRegistry(),
             new SchedulerService(),
+            Mock.Of<ICloudWatchMetricsService>(),
             Mock.Of<ILogger<AutoPostOrchestrator>>());
     }
 
