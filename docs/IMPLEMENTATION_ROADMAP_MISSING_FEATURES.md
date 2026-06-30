@@ -2,7 +2,13 @@
 
 ## Scope
 
-This document covers features visible in the architecture diagram that are **not yet implemented** in our Generic-Solution. Focus: InvitedClub + Sevita clients only. Our platform is generic with plugin-based architecture, so enhancements benefit all clients automatically.
+This document covers features visible in the architecture diagram that are **not yet implemented** in our Generic-Solution.
+
+**Production scale context:**
+- 40+ clients (InvitedClub, Sevita, Media, Greenthal, Akron, MDS, and many more)
+- Invoice volumes per client: 50K, 1 lakh (100K), 5 lakh (500K), 10 lakh (1M)
+- Each client has different business logic (plugin-based)
+- Platform is generic with plugin architecture — enhancements benefit all clients
 
 **Excluded from this document** (decided not to implement):
 - ~~AWS X-Ray~~ — Not needed; CorrelationId in logs is sufficient
@@ -13,75 +19,266 @@ This document covers features visible in the architecture diagram that are **not
 
 ---
 
-## Feature 1: AWS Step Functions (Invoice Posting Orchestration)
+## Feature 1: AWS Step Functions — Hybrid Design (Orchestration + ECS Processing)
 
-**Diagram location:** Left purple box — "AWS Step Functions (Orchestrates Invoice Posting Workflow)" with 4 Lambda steps
+**Diagram location:** Left box — "INVOICE POSTING FLOW (CONFIG DRIVEN)" with Start Workflow Lambda + Step Functions
 
 ### What We Have Currently
 
 Our posting flow runs inside a single C# class (`AutoPostOrchestrator`) on an ECS Fargate worker:
 
 ```
-SQS Message → PostWorker → MediatR Pipeline → AutoPostOrchestrator
-                                                  ├─ Load config from DB
-                                                  ├─ Check schedule window
-                                                  ├─ OnBeforePostAsync (plugin hook)
-                                                  ├─ Fetch workitems
-                                                  ├─ plugin.ExecutePostAsync() ← sequential loop
-                                                  ├─ Write execution history
-                                                  └─ Publish CloudWatch metrics
+CURRENT FLOW:
+
+MANUAL:    Workflow UI → .NET API → PostWorker (ECS) → MediatR → AutoPostOrchestrator → Plugin
+SCHEDULED: EventBridge → ips-post-queue → PostWorker (ECS) → MediatR → AutoPostOrchestrator → Plugin
+
+AutoPostOrchestrator (single C# class — sequential processing):
+  ├─ Load config from DB
+  ├─ Check schedule window
+  ├─ OnBeforePostAsync (plugin hook)
+  ├─ Fetch workitems
+  ├─ plugin.ExecutePostAsync() ← sequential loop (one item at a time)
+  ├─ Write execution history
+  └─ Publish CloudWatch metrics
 ```
 
-All steps run in a single process. If the process crashes mid-batch, the SQS message becomes visible again after the visibility timeout (2 hours), and the next worker picks it up — reprocessing only items with `PostInProcess=0`.
+**Problem at scale:** If a client has 1 lakh (100,000) invoices at 3 seconds each = 300,000 seconds = **3.5 days** to process one batch sequentially. Completely unacceptable.
 
-### What Step Functions Would Add
+### What the Diagram Proposes — Hybrid Architecture (Recommended)
 
-Replace `AutoPostOrchestrator` with an AWS-managed state machine:
+**Key principle:** Use Step Functions for **orchestration and visibility only**. Keep the heavy processing in **ECS Fargate** where there are no timeout or payload size limits.
 
 ```
-SQS Message → Step Functions State Machine
-                ├─ State 1: Lambda — Configuration Loader
-                ├─ State 2: Lambda — Work Item Fetcher
-                ├─ State 3: Map State — Batch Processors (PARALLEL)
-                │            ├─ Lambda invocation for Item 101
-                │            ├─ Lambda invocation for Item 102
-                │            └─ Lambda invocation for Item 103 (concurrent)
-                ├─ State 4: Lambda — Results Aggregator
-                └─ Catch: Lambda — Error Handler / Notification
+TARGET FLOW:
+
+MANUAL:    Workflow UI → .NET API → invoice-post-queue → Start Workflow Lambda → Step Functions
+SCHEDULED: EventBridge → invoice-post-queue (DIRECT TO SQS) → Start Workflow Lambda → Step Functions
+
+Both paths converge at the same SQS queue.
+The Start Workflow Lambda handles both trigger types identically.
+```
+
+### Trigger Paths (Explicit)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                      │
+│  SCHEDULED PATH: "DIRECT TO SQS (Scheduled)"                        │
+│  EventBridge ──→ invoice-post-queue ──→ Start Workflow Lambda        │
+│                                                                      │
+│  MANUAL PATH: "VIA API (Manual)"                                     │
+│  Workflow UI ──→ .NET API ──→ invoice-post-queue ──→ Start Lambda    │
+│                                                                      │
+│  Both paths converge at the same SQS queue.                          │
+│  The Start Workflow Lambda handles both trigger types identically.    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Detailed Hybrid Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SQS: invoice-post-queue                                                  │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ START WORKFLOW LAMBDA (lightweight — 10 seconds max)                      │
+│   • Validate SQS message                                                 │
+│   • Load basic config (job_id, client_type, is_active)                   │
+│   • Start Step Functions execution                                       │
+│   • Pass only metadata: { jobId, clientType, triggerType }               │
+│   • Does NOT load workitems or reference data                            │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                                ▼
+╔═════════════════════════════════════════════════════════════════════════════╗
+║ AWS STEP FUNCTIONS (orchestration only — no heavy work)                    ║
+║                                                                            ║
+║  State 1: PREPARE EXECUTION (Lambda — 30 sec max)                          ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Count pending workitems: SELECT COUNT(*) WHERE PostInProcess=0   │    ║
+║  │ • Decide chunk size (e.g., 1000 per chunk)                        │    ║
+║  │ • Return: { totalItems: 100000, chunkSize: 1000, chunks: 100 }   │    ║
+║  │ • Does NOT fetch actual workitem data (avoids 256KB payload limit)│    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  State 2: PROCESS CHUNKS (Map State — parallel ECS tasks)                  ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ MaxConcurrency: 50 (configurable per client)                       │    ║
+║  │                                                                    │    ║
+║  │ For each chunk (0 to 99):                                         │    ║
+║  │   ┌─────────────────────────────────────────────────────────────┐ │    ║
+║  │   │ ECS FARGATE TASK (ecs:runTask.sync — NO timeout!)           │ │    ║
+║  │   │                                                              │ │    ║
+║  │   │   Receives: { jobId, clientType, chunkIndex, chunkSize }    │ │    ║
+║  │   │   Loads ALL data itself from DB:                            │ │    ║
+║  │   │     • Client config                                         │ │    ║
+║  │   │     • Reference data (ValidIds, etc.) — any size            │ │    ║
+║  │   │     • Workitems: OFFSET + FETCH NEXT (pagination)           │ │    ║
+║  │   │   Processes 1000 items via plugin                           │ │    ║
+║  │   │   Writes results to DB (execution history per item)         │ │    ║
+║  │   │   Returns: { success: 950, failed: 50 }                    │ │    ║
+║  │   │                                                              │ │    ║
+║  │   │   NO timeout limit (can run for hours)                      │ │    ║
+║  │   │   NO payload size limit (loads its own data)                │ │    ║
+║  │   │   NO cold start (ECS Fargate = container)                   │ │    ║
+║  │   └─────────────────────────────────────────────────────────────┘ │    ║
+║  │                                                                    │    ║
+║  │ 50 ECS tasks running simultaneously = 50,000 items in parallel    │    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  State 3: AGGREGATE RESULTS (Lambda — 10 sec)                              ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Read results from DB (sum of all chunk results)                  │    ║
+║  │ • Write final execution history                                   │    ║
+║  │ • Publish CloudWatch metrics                                      │    ║
+║  │ • Return: { total: 100000, success: 95000, failed: 5000 }        │    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  State 4: NOTIFY (Lambda — 5 sec)                                          ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Publish to SNS: "Client X: 100,000 processed, 95,000 success"  │    ║
+║  └───────────────────────────────────────────────────────────────────┘    ║
+║                                                                            ║
+║  CATCH: ERROR HANDLER (Lambda — 5 sec)                                     ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Log failure, mark execution as FAILED, send failure SNS         │    ║
+║  └───────────────────────────────────────────────────────────────────┘    ║
+║                                                                            ║
+╚═════════════════════════════════════════════════════════════════════════════╝
+```
+
+### How This Avoids ALL Issues
+
+| Issue | How It's Avoided |
+|---|---|
+| **256 KB payload limit** | Only metadata passed between steps (~100 bytes: jobId, chunkIndex, chunkSize). ECS tasks load their own data from DB. |
+| **Lambda 15-min timeout** | Heavy processing runs in ECS Fargate (NO timeout). Lambda only does lightweight coordination (5-30 seconds). |
+| **Cold start latency** | Lightweight Lambdas stay warm (40 clients = frequent calls). ECS has no cold start concept. |
+| **Large reference data (ValidIds)** | Each ECS task loads its own reference data from DB. Nothing passed between steps. No size limit. |
+| **Lakh-level volumes** | Map State with MaxConcurrency=50 → 50 parallel ECS tasks → hours instead of days. |
+
+### What Runs Where (Clear Separation)
+
+| Component | Runs In | Why | Time |
+|---|---|---|---|
+| Validate SQS message | Lambda (Start Workflow) | Lightweight, stateless | 5 sec |
+| Count pending workitems | Lambda (PrepareExecution) | Single DB query, returns a number | 10 sec |
+| **Process workitems (API calls)** | **ECS Fargate** | No timeout, no payload limit, loads own data | 10-60 min |
+| **Load ValidIds / reference data** | **ECS Fargate** (inside the task) | Can be any size | Part of task |
+| Sum up results | Lambda (AggregateResults) | Reads from DB, lightweight math | 5 sec |
+| Send notification | Lambda (SendNotification) | SNS publish | 2 sec |
+| Error handling | Lambda (HandleError) | Log + notify | 2 sec |
+
+**Rule:** If it's coordination/metadata → Lambda. If it's heavy processing/data → ECS Fargate.
+
+### Performance at Scale
+
+| Client Volume | Chunks | Concurrent ECS Tasks | Total Processing Time |
+|---|---|---|---|
+| 50 items | 1 | 1 | 3 minutes |
+| 1,000 items | 1 | 1 | 30 minutes |
+| 10,000 items | 10 | 10 | 30 minutes (parallel) |
+| 50,000 items | 50 | 50 | 30 minutes (parallel) |
+| 1 lakh (100K) | 100 | 50 (2 rounds) | ~60 minutes |
+| 5 lakh (500K) | 500 | 50 (10 rounds) | ~5 hours |
+| 10 lakh (1M) | 1000 | 50 (20 rounds) | ~10 hours |
+
+**vs Current sequential approach:**
+- 1 lakh items × 3 sec = 83 hours (3.5 days!)
+- 5 lakh items × 3 sec = 416 hours (17 days!)
+
+### Visual Debugging Experience (AWS Console)
+
+```
+Execution: MegaCorp-5001-20260630-080000
+Status: RUNNING (2 hours elapsed)
+
+├─ ✅ StartWorkflowLambda (2s)
+├─ ✅ PrepareExecution (5s) — { totalItems: 100000, chunks: 100 }
+├─ ⏳ ProcessChunks (Map State — 100 iterations, MaxConcurrency: 50)
+│     ├─ ✅ Chunk 0 (18 min) — { success: 950, failed: 50 }
+│     ├─ ✅ Chunk 1 (15 min) — { success: 980, failed: 20 }
+│     ├─ ❌ Chunk 2 (FAILED — Oracle returned 503)
+│     │     └─ Retry 1/2 in 30 seconds...
+│     ├─ ✅ Chunk 3 (22 min) — { success: 940, failed: 60 }
+│     ├─ ⏳ Chunk 48 (running — 12 min elapsed)
+│     ├─ ⏳ Chunk 49 (running — 8 min elapsed)
+│     └─ ⏸ Chunks 50-99 (queued, waiting for slot)
+├─ ⏸ AggregateResults (waiting)
+└─ ⏸ SendNotification (waiting)
+
+Progress: 48/100 chunks complete (48%)
+```
+
+Click on any chunk → see its ECS task logs, input, output, duration. **No log searching required.**
+
+### Cost at Scale (Example: 1 Lakh Invoices)
+
+```
+Step Functions:
+  State transitions: 1 (Prepare) + 100 (Map iterations) + 1 (Aggregate) + 1 (Notify) = 103
+  Cost: 103 × $0.000025 = $0.003
+
+Lambda (lightweight steps only):
+  4 invocations × 10 sec average × 256MB = ~$0.0002
+
+ECS Fargate (heavy processing):
+  50 concurrent tasks × 20 min each × (1 vCPU + 2GB RAM)
+  = 50 × 0.33 hours × $0.04/hour = $0.66
+
+Total per execution: ~$0.67
+Monthly (4 runs/day × 30 days): ~$80 for a 1-lakh client
 ```
 
 ### Benefits
 
 | Benefit | Description |
 |---|---|
-| Visual execution tracking | See real-time in AWS Console — which step is running, which failed, full input/output |
-| Parallel workitem processing | Map State processes 20-50 items simultaneously (one Lambda per item) |
-| Per-step retry with backoff | Each step has its own retry config (exponential backoff on Oracle 503) |
-| Resume from failure | Restart from the failed step, not the beginning |
-| Built-in execution history | Every execution stored 90 days free |
-| Error routing | Catch blocks route to specific handlers per error type |
+| **Parallel processing** | 50 ECS tasks run simultaneously. 1 lakh items in ~60 min instead of 83 hours. |
+| **Visual debugging** | See exactly which chunk failed, click to inspect. No log searching across 40 clients. |
+| **Per-chunk retry** | If Oracle Fusion returns 503, Step Functions retries that specific chunk (not the whole batch). |
+| **No limits** | ECS tasks have no timeout, no payload limit, load their own data. |
+| **Client isolation** | Each client runs its own Step Functions execution. One client's failure doesn't block another. |
+| **Notification built-in** | State 4 (Notify) sends SNS after every batch — no separate implementation needed. |
+| **Resume from failure** | If chunk 45 fails, restart from chunk 45 — don't reprocess chunks 0-44. |
 
-### Cons
+### Cons (Honest Assessment at Scale)
 
-| Con | Description |
+| Con | Real Impact at 40+ Clients |
 |---|---|
-| Lambda 15-minute limit | Each Lambda has max 15-min runtime. Fine per-item, but limits large batch processing within a single invocation. |
-| Cold start latency | 1-3 seconds per Lambda invocation. For 50-item manual post = 100s overhead. Our ECS has zero cold start. |
-| Increased complexity | State machine JSON, IAM roles per Lambda, separate deployments. More moving parts. |
-| Not suitable for Sevita's OnBeforePostAsync | Sevita loads ValidIds via raw SqlConnection before the loop. Passing large HashSet between Lambda steps is awkward. |
-| Team skill requirement | Need to learn Step Functions ASL (Amazon States Language) and distributed Lambda debugging. |
+| **Team learning curve** | Need to learn Step Functions ASL, ECS RunTask integration, IAM for cross-service. ~1 week learning for the team. |
+| **Local development** | Can't run Step Functions locally with `F5`. Need AWS SAM CLI or deploy to a dev account for testing. |
+| **Deployment pipeline** | CI/CD deploys state machine + Lambdas + ECS task definition instead of just 1 Docker image. More stages but manageable. |
+| **Vendor lock-in** | Step Functions ASL is AWS-specific. If we ever move off AWS (unlikely), the orchestration needs rewriting. ECS plugin code is portable. |
 
-### Effort: ~11 days
+### Effort: ~14 days
+
+| Work Item | Effort |
+|---|---|
+| Design state machine (ASL JSON) | 2 days |
+| Create Start Workflow Lambda | 1 day |
+| Create PrepareExecution Lambda | 1 day |
+| Create ECS Batch Processor task definition (refactor from orchestrator) | 3 days |
+| Create AggregateResults Lambda | 1 day |
+| Create Notify + ErrorHandler Lambdas | 1 day |
+| CloudFormation (state machine, IAM roles, task definitions) | 2 days |
+| Testing (unit + integration + parallel scenarios) | 3 days |
+| **Total** | **~14 days** |
 
 ### Recommendation
 
-**Don't implement now.** Our ECS-based orchestrator works correctly. Step Functions becomes valuable when we need parallel processing for 500+ items or visual operational dashboards. For InvitedClub + Sevita with 10-100 item batches, the sequential C# approach is simpler, faster, and equally reliable.
+**HIGH PRIORITY — implement before scaling to 40+ clients.** At lakh-level volumes, sequential processing is non-viable (days instead of hours). The hybrid design gives parallel processing with zero timeout/size constraints. Visual debugging across 40 clients is essential for operations. Start with InvitedClub + Sevita to validate the architecture, then all new clients automatically benefit.
 
 ---
 
 ## Feature 2: Parallel Batch Processing
 
-**Diagram location:** Left purple box — "3. Batch Processors (Lambda, Parallel)" and "Workflow Capabilities: Parallel Batch Processing"
+**Diagram location:** "Batch Processors (Parallel)" in Step Functions and "Parallel Workers" in ECS Fargate
+
+> **NOTE:** This feature is now INCLUDED in the Step Functions Hybrid Design (Feature 1). The Map State with `MaxConcurrency=50` provides parallel processing by launching multiple ECS Fargate tasks simultaneously. No separate implementation needed.
 
 ### What We Have Currently
 
@@ -102,43 +299,21 @@ foreach (var workitem in workitems)
 }
 ```
 
-100 workitems = 100 × 2-5 seconds = 200-500 seconds total.
+### How Hybrid Design Solves This
 
-However, the PostWorker polls **10 SQS messages simultaneously** (`MaxNumberOfMessages=10`), so 10 different jobs run concurrently. Parallelism is at the **job level**, not the workitem level within a single job.
+```
+Step Functions Map State (MaxConcurrency=50):
+  ├─ ECS Task 0: processes items 1-1000 (parallel within task: 5 concurrent)
+  ├─ ECS Task 1: processes items 1001-2000
+  ├─ ECS Task 2: processes items 2001-3000
+  ├─ ...
+  └─ ECS Task 49: processes items 49001-50000
 
-### What Parallel Processing Would Add
-
-```csharp
-var batches = workitems.Chunk(10);
-foreach (var batch in batches)
-{
-    var tasks = batch.Select(item => ProcessSingleItemAsync(item));
-    await Task.WhenAll(tasks);
-}
+  50 chunks × 1000 items × 5 concurrent per chunk = 250,000 items/hour
+  vs current: ~1,200 items/hour (sequential)
 ```
 
-### Benefits
-
-| Benefit | Description |
-|---|---|
-| Faster batch completion | 100 items at 10-concurrent = ~50 seconds instead of 500 |
-| Better for manual posts | User waits less time for synchronous response |
-| Better queue throughput | Messages leave the queue faster |
-
-### Cons
-
-| Con | Description |
-|---|---|
-| Oracle Fusion rate limits | Oracle may throttle concurrent requests from same IP (HTTP 429) |
-| Sevita API rate limits | Same concern for Sevita's OAuth2 API |
-| Error complexity | Multiple items failing simultaneously need independent error handling |
-| Database connection pressure | 10 concurrent × 10 polled messages = 100 simultaneous DB connections (pool is 2000, so safe) |
-
-### Effort: ~7 days
-
-### Recommendation
-
-**Low priority.** Typical batches (10-50 items) complete in 30-120 seconds sequentially. Implement when batch sizes regularly exceed 200+ items or users complain about wait times.
+**Result:** ~200x faster at scale. No separate "Parallel Batch Processing" feature needed — it's built into the Step Functions architecture.
 
 ---
 
@@ -251,41 +426,81 @@ GET /api/status/exec-abc-123 → { "status": "completed", "recordsSuccess": 480,
 
 ---
 
-## Feature 5: Notifications — Push Status to UI
+## Feature 5: Notifications — SNS in Both Flows + Push Status to UI
 
-**Diagram location:** Top right — "NOTIFICATIONS: Amazon SNS → Email" and bottom flow step 5 — "Status pushed to UI via API / WebSocket / Polling"
+**Diagram location:**
+- Top section — "NOTIFICATIONS: Amazon SNS → Email Notifications, Slack Notifications, Teams Notifications, Other Channels"
+- Bottom of Invoice Posting Flow — "Amazon SNS Notifications" (post completion alerts)
+- Bottom of Feed Download Flow — "Amazon SNS Notifications: Feed Download Status, Success / Failure Alerts"
 
 ### What We Have Currently
 
 - **Scheduled posts:** Results written to `generic_execution_history`. No push notification to anyone. Users must check the Status API.
 - **Manual posts:** Synchronous response — user gets the result immediately.
-- **Failure alerts:** CloudWatch Alarm → SNS → Email to ops team.
+- **Failure alerts:** CloudWatch Alarm → SNS → Email to ops team (DLQ depth, PostFailedCount).
+- **Feed download completion:** No notification at all. Results logged to CloudWatch only.
+
+SNS is used in **one place only** — CloudWatch Alarms for failures.
 
 ### What the Diagram Shows
 
-After every execution (scheduled or manual), status is actively pushed to the Workflow UI so users see results without manually checking.
+**SNS appears TWICE in the architecture** — serving two different purposes:
+
+```
+1. TOP-LEVEL NOTIFICATIONS (centralized notification hub):
+   Amazon SNS → Email / Slack / Teams / Other
+   Purpose: Operational alerts, job status summaries, SLA notifications
+
+2. BOTTOM OF INVOICE POSTING FLOW:
+   After Step Functions completes → Amazon SNS Notification
+   Purpose: "Job 1001 (InvitedClub) completed: 95 success, 5 failed"
+
+3. BOTTOM OF FEED DOWNLOAD FLOW:
+   After ECS Fargate feed completes → Amazon SNS Notification
+   Purpose: "Feed Download Status: Supplier feed completed, 1,200 records downloaded"
+            "Feed Download FAILED: COA feed timeout after 30 minutes"
+```
+
+### What We Need to Add
+
+| Notification Point | Trigger | Message Content |
+|---|---|---|
+| Post batch completion (success) | AutoPostOrchestrator finishes batch | "InvitedClub Job 1001: 50 posted, 2 failed" |
+| Post batch failure | Unhandled exception in posting | "InvitedClub Job 1001: FAILED — Oracle Fusion timeout" |
+| Feed download success | FeedResult.Success returned | "InvitedClub Supplier Feed: 1,200 records downloaded" |
+| Feed download failure | FeedResult.Failed returned | "InvitedClub COA Feed: FAILED — connection timeout" |
 
 ### Benefits
 
 | Benefit | Description |
 |---|---|
 | Ops awareness | Team knows immediately when a scheduled batch completes or fails |
-| User experience | No need to manually check status API after triggering a post |
-| Proactive alerts | UI can show "InvitedClub 8:00 AM batch: 95 success, 5 failed" without user action |
+| Feed visibility | Currently feed downloads complete silently — no one knows unless they check logs |
+| Proactive alerts | Don't wait for CloudWatch alarm thresholds — notify on every failure immediately |
+| Dual notification approach | CloudWatch Alarms for infrastructure issues (DLQ, crashes) + SNS for business outcomes (post results, feed status) |
 
 ### Cons
 
 | Con | Description |
 |---|---|
-| UI integration required | Workflow UI needs a notification panel or WebSocket connection |
-| Complexity | Need to define what events to push, to whom, and how (WebSocket vs polling vs email) |
-| Over-notification | 4 scheduled batches/day × 2 clients = 8 notifications/day — potentially noisy |
+| Notification volume | 4 scheduled batches/day × 2 clients + 2 feed downloads/day = 10 notifications/day |
+| SNS cost | Negligible — first 1,000 emails/month are free |
+| UI integration (optional) | If pushing to Workflow UI, need a notification panel or WebSocket |
 
-### Effort: ~5 days (backend: SNS → notification endpoint) + UI team work
+### Effort: ~3-4 days
+
+| Work Item | Effort |
+|---|---|
+| Create SNS topic for posting notifications | 0.5 day |
+| Create SNS topic for feed notifications | 0.5 day |
+| Add SNS publish call in AutoPostOrchestrator after batch completion | 1 day |
+| Add SNS publish call in FeedWorker after feed download completion | 1 day |
+| Add to CloudFormation (topics, subscriptions, IAM) | 0.5 day |
+| **Total** | **~3.5 days** |
 
 ### Recommendation
 
-**Not needed now.** Our CloudWatch Alarms handle failure notifications via email. Success notifications are low value — nobody needs to know "everything worked fine." Implement when the operations team actively monitors a dashboard and wants real-time feed.
+**Medium priority.** The feed download notification is the most valuable — currently feeds complete silently and failures go unnoticed until someone manually checks. Post completion notifications are less critical since we already have CloudWatch Alarms for failures. Implement when the ops team wants proactive visibility into feed health.
 
 ---
 
@@ -362,31 +577,30 @@ The `generic_feed_configuration` table supports `feed_source_type` values: `REST
 
 ## Priority Summary
 
-| # | Feature | Effort | Benefit for InvitedClub + Sevita | Priority |
+| # | Feature | Effort | Benefit at 40+ Clients / Lakh Volumes | Priority |
 |---|---|---|---|---|
-| 1 | **S3 Gateway Endpoint** (free) | 0.5 day | Better security, minor cost savings | **Do First** |
-| 2 | **Parallel Batch Processing** | 7 days | Faster InvitedClub batches | **Medium — when batch sizes grow** |
-| 3 | **Async Manual Post** | 8-10 days | Prevents timeouts on large manual posts | **Low — not needed at current volume** |
-| 4 | **VPC Interface Endpoints** | 2.5 days | Cost savings (only if NAT > $60/month) | **Low — measure first** |
-| 5 | **Notifications / Push to UI** | 5 days | Proactive ops awareness | **Low** |
-| 6 | **Step Functions** | 11 days | Visual ops, parallel processing | **Not Now** |
-| 7 | **Additional ERP Clients** | 6-11 days each | N/A (future scope) | **Not Now** |
-| 8 | **SOAP/FTP/SFTP Feed Sources** | 7-9 days | N/A (no current client needs it) | **Not Now** |
+| 1 | **Step Functions Hybrid (ECS processing)** | 14 days | Critical — parallel processing, visual debugging, client isolation | **HIGH — implement before scaling** |
+| 2 | **S3 Gateway Endpoint** (free) | 0.5 day | Better security, minor cost savings | **HIGH — Do immediately** |
+| 3 | **SNS Notifications (Post + Feed completion)** | 3.5 days | Feed failure visibility, ops awareness across 40 clients | **HIGH — essential at scale** |
+| 4 | **Parallel Batch Processing** | — | Included in Step Functions hybrid (Map State parallelism) | **Covered by Feature 1** |
+| 5 | **Async Manual Post** | 8-10 days | Prevents timeouts on lakh-level manual posts | **Medium — needed for large volumes** |
+| 6 | **VPC Interface Endpoints** | 2.5 days | Significant cost savings at 40+ client traffic volume | **Medium — measure NAT costs** |
+| 7 | **Additional ERP Clients** | 6-11 days each | Platform growth | **Ongoing — one at a time** |
+| 8 | **SOAP/FTP/SFTP Feed Sources** | 7-9 days | Required by some future clients | **When needed** |
 
 ---
 
 ## Suggested Implementation Order
 
-### Immediate (this week)
-1. **S3 Gateway Endpoint** — add to `infrastructure.yaml`. Free. Zero risk.
+### Phase 1 — Foundation for Scale (3 weeks)
+1. **S3 Gateway Endpoint** (0.5 day) — free, zero risk
+2. **Step Functions Hybrid Architecture** (14 days) — the backbone for 40+ clients and lakh-level volumes
+3. **SNS Notifications** (3.5 days) — visibility across all clients
 
-### When Needed (triggered by real usage)
-2. **Parallel Batch Processing** — when InvitedClub batches regularly exceed 200 items
-3. **Async Manual Post** — when users report browser timeout on large manual posts
-4. **VPC Interface Endpoints** — when monthly NAT data transfer costs exceed $60
+### Phase 2 — Production Hardening (when volume grows)
+4. **Async Manual Post** — when users post 200+ items manually
+5. **VPC Interface Endpoints** — when NAT costs exceed $60/month (likely at 40+ clients)
 
-### Future (production scale)
-5. **Notifications / Push to UI** — when ops team wants proactive status
-6. **Step Functions** — when workflows become complex or visual dashboards are required
-7. **Additional Clients** — one at a time, after platform proven in production
-8. **SOAP/FTP/SFTP** — when a client that requires these is onboarded
+### Phase 3 — Client Expansion (ongoing)
+6. **Additional ERP Clients** — one at a time, plugin by plugin
+7. **SOAP/FTP/SFTP** — when a client needs it
