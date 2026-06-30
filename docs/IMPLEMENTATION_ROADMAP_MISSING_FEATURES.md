@@ -171,6 +171,24 @@ Code:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
+│ TRIGGERS                                                                 │
+│                                                                          │
+│ SCHEDULED:                                                               │
+│   EventBridge Rule (ips-autopost-1001-post)                              │
+│     → drops message into: ips-post-invitedclub-prod                      │
+│   EventBridge Rule (ips-autopost-2001-post)                              │
+│     → drops message into: ips-post-sevita-prod                           │
+│                                                                          │
+│ MANUAL:                                                                  │
+│   Workflow UI → POST /api/post/{jobId}/items/{itemIds}                   │
+│     → .NET API looks up client_type from jobId                           │
+│     → derives queue: ips-post-{clientType}-{env}                         │
+│     → sends message to that queue                                        │
+│     → returns HTTP 202: { executionId: "exec-abc-123", status: "queued" }│
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
 │ Per-Client SQS Queues (dynamically created):                             │
 │   ips-post-invitedclub-prod                                              │
 │   ips-post-sevita-prod                                                   │
@@ -262,6 +280,136 @@ Code:
 ║                                                                            ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 ```
+
+### RDS Proxy — Connection Pooling for Lambda-at-Scale
+
+**The Problem Without RDS Proxy:**
+
+Each Lambda invocation opens its own database connection. With `MaxConcurrency=50`:
+- 50 concurrent Lambdas = 50 simultaneous DB connections (just for one client)
+- 40 clients × 50 concurrent = **2,000 simultaneous connections** at peak
+- SQL Server max connections = depends on instance size (typically 500-32,000)
+- Lambda connections are SHORT-LIVED — opened, used for 5 seconds, closed. This creates rapid open/close churn that stresses the DB.
+
+```
+WITHOUT RDS Proxy:
+  Lambda 1 → OPEN connection → query → INSERT → CLOSE (7 sec)
+  Lambda 2 → OPEN connection → query → INSERT → CLOSE (7 sec)
+  Lambda 3 → OPEN connection → query → INSERT → CLOSE (7 sec)
+  ... × 50 concurrent
+  
+  SQL Server sees: 50 connections open → 50 connections close → 50 new connections open
+  Every 7 seconds = constant connection churn
+  Each OPEN costs ~30-50ms (TCP handshake + TLS + auth)
+```
+
+**The Solution — RDS Proxy:**
+
+RDS Proxy sits between Lambda and RDS. It maintains a **persistent pool** of connections to the database. Lambdas connect to the proxy (fast — already established), and the proxy reuses its existing connections to RDS.
+
+```
+WITH RDS Proxy:
+  Lambda 1 → connect to Proxy (< 5ms, reuses pooled connection) → query → done
+  Lambda 2 → connect to Proxy (< 5ms, reuses pooled connection) → query → done
+  Lambda 3 → connect to Proxy (< 5ms, reuses pooled connection) → query → done
+  ... × 50 concurrent
+
+  RDS Proxy maintains: 20 persistent connections to SQL Server (never closes them)
+  50 Lambdas share those 20 connections via multiplexing
+  SQL Server sees: 20 stable, long-lived connections. No churn.
+```
+
+**Layman analogy:** Without proxy = 50 people each calling the restaurant to place an order (50 phone calls, phone lines overwhelmed). With proxy = 1 secretary takes all 50 orders and calls the restaurant once with a list (1 phone call, restaurant not overwhelmed).
+
+**What RDS Proxy does:**
+
+| Feature | Description |
+|---|---|
+| **Connection pooling** | Maintains a pool of open DB connections. Lambdas borrow a connection, use it, return it. No open/close overhead. |
+| **Connection multiplexing** | 50 Lambda requests can share 20 actual DB connections by taking turns (each Lambda only needs it for milliseconds per query). |
+| **Connection reuse** | When Lambda finishes and the next Lambda starts, it reuses the SAME underlying DB connection. No new TCP/TLS handshake. |
+| **Failover handling** | If RDS fails over to a standby, the proxy automatically reconnects. Lambdas don't notice. |
+| **Credential management** | Proxy reads DB credentials from Secrets Manager. Lambdas don't need DB passwords — they authenticate to the proxy via IAM. |
+
+**How it fits in our architecture:**
+
+```
+Lambda (Batch Processor)
+    │
+    │ "I need to query workitem data and write history"
+    │
+    ▼
+RDS Proxy (ips-autopost-proxy-prod)
+    │
+    │ Borrows a connection from its pool (< 5ms)
+    │ Executes the query on the Lambda's behalf
+    │ Returns the connection to the pool
+    │
+    ▼
+RDS SQL Server (ips-rds-database-1)
+    │
+    │ Sees only 20-50 persistent connections (not 2,000 churning ones)
+```
+
+**Connection math at scale:**
+
+| Scenario | Without Proxy | With Proxy |
+|---|---|---|
+| 1 client, 50 concurrent Lambdas | 50 connections | ~10 pooled connections |
+| 10 clients, 50 concurrent each | 500 connections | ~50 pooled connections |
+| 40 clients, 50 concurrent each | 2,000 connections | ~100-200 pooled connections |
+| Peak burst (all 40 fire simultaneously) | 2,000+ connections (may exceed DB limit!) | Still 100-200 (proxy queues excess) |
+
+**Cost:**
+
+```
+RDS Proxy pricing: $0.015 per vCPU-hour of the underlying DB instance
+
+Example: RDS instance with 4 vCPUs
+  Cost: 4 × $0.015 × 24 hours × 30 days = $43.20/month
+
+This is a FIXED cost regardless of how many Lambdas connect.
+```
+
+**Why it's essential for our Lambda-per-item architecture:**
+
+| Without RDS Proxy | With RDS Proxy |
+|---|---|
+| Each Lambda opens/closes a connection (50ms overhead × 2 per item) | Connection borrowed in < 5ms |
+| 40 clients × 50 concurrent = 2,000 connections → DB overwhelmed | Proxy pools to 100-200 connections → DB relaxed |
+| DB sees constant open/close churn → CPU wasted on connection management | DB sees stable long-lived connections → CPU used for queries |
+| Lambda cold start + new connection = 3+ seconds | Lambda connects to proxy in < 5ms (even on cold start) |
+| If DB fails over, all 2,000 connections drop → mass Lambda failures | Proxy handles failover transparently → Lambdas don't notice |
+
+**Configuration in our architecture:**
+
+```yaml
+# CloudFormation — RDS Proxy
+RdsProxy:
+  Type: AWS::RDS::DBProxy
+  Properties:
+    DBProxyName: ips-autopost-proxy-{env}
+    EngineFamily: SQLSERVER
+    Auth:
+      - AuthScheme: SECRETS
+        SecretArn: !Ref WorkflowDbSecret
+        IAMAuth: REQUIRED
+    RoleArn: !GetAtt RdsProxyRole.Arn
+    VpcSubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+    VpcSecurityGroupIds: [!Ref EcsSecurityGroup]
+```
+
+**Code change in Lambda:** Replace the direct RDS connection string with the proxy endpoint:
+
+```csharp
+// Instead of:
+var connectionString = "Server=ips-rds-database-1.cmrmduasa2gk.us-east-1.rds.amazonaws.com;Database=Workflow;..."
+
+// Use:
+var connectionString = "Server=ips-autopost-proxy-prod.proxy-cmrmduasa2gk.us-east-1.rds.amazonaws.com;Database=Workflow;..."
+```
+
+Same connection string format — just a different hostname. No other code changes.
 
 ### Why .NET Lambda (1 Item) Instead of ECS
 
@@ -558,6 +706,7 @@ FEED NOTIFICATIONS:
 ### Phase 1 — Foundation for Scale
 1. **Step Functions + .NET Lambda architecture** — includes:
    - Per-client SQS queues (dynamically created/managed by Scheduler Lambda)
+   - RDS Proxy (connection pooling for Lambda-at-scale — essential for 40+ clients)
    - Start Workflow Lambda (SQS consumer, subscribes to all client queues)
    - Prepare Execution Lambda (fetch ItemIds, load config)
    - Batch Processor Lambda (1 item per invocation, plugin logic)
@@ -566,7 +715,7 @@ FEED NOTIFICATIONS:
    - Error Handler Lambda (failure SNS)
    - Step Functions state machine (ASL JSON)
    - Scheduler Lambda update (queue provisioning + EventBridge rule targeting per-client queue)
-   - CloudFormation (state machine, IAM roles, Lambda functions)
+   - CloudFormation (state machine, IAM roles, Lambda functions, RDS Proxy)
 2. **API change** — return 202 instead of 200, route to correct client queue based on job config
 3. **Status API enhancement** — add progress tracking from Step Functions execution status
 
