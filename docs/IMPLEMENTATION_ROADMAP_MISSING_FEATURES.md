@@ -254,19 +254,18 @@ Monthly (4 runs/day × 30 days): ~$80 for a 1-lakh client
 | **Deployment pipeline** | CI/CD deploys state machine + Lambdas + ECS task definition instead of just 1 Docker image. More stages but manageable. |
 | **Vendor lock-in** | Step Functions ASL is AWS-specific. If we ever move off AWS (unlikely), the orchestration needs rewriting. ECS plugin code is portable. |
 
-### Effort: ~14 days
+### Effort
 
-| Work Item | Effort |
+| Work Item | Description |
 |---|---|
-| Design state machine (ASL JSON) | 2 days |
-| Create Start Workflow Lambda | 1 day |
-| Create PrepareExecution Lambda | 1 day |
-| Create ECS Batch Processor task definition (refactor from orchestrator) | 3 days |
-| Create AggregateResults Lambda | 1 day |
-| Create Notify + ErrorHandler Lambdas | 1 day |
-| CloudFormation (state machine, IAM roles, task definitions) | 2 days |
-| Testing (unit + integration + parallel scenarios) | 3 days |
-| **Total** | **~14 days** |
+| Design state machine (ASL JSON) | Define the workflow states, transitions, retry policies, and Map State configuration |
+| Create Start Workflow Lambda | SQS consumer that validates messages and starts Step Functions executions |
+| Create PrepareExecution Lambda | Counts pending workitems and calculates chunk configuration |
+| Create ECS Batch Processor task definition | Refactor plugin execution logic from AutoPostOrchestrator into a standalone ECS-runnable container |
+| Create AggregateResults Lambda | Reads chunk results from DB, writes final execution history, publishes metrics |
+| Create Notify + ErrorHandler Lambdas | SNS publish for success/failure notifications |
+| CloudFormation | State machine, IAM roles, task definitions, permissions |
+| Testing | Unit + integration + parallel scenarios |
 
 ### Recommendation
 
@@ -317,70 +316,13 @@ Step Functions Map State (MaxConcurrency=50):
 
 ---
 
-## Feature 3: VPC Endpoints
-
-**Diagram location:** Bottom security bar — "VPC Endpoints — S3, Secrets Manager, SQS, CloudWatch Logs"
-
-### What We Have Currently
-
-All AWS service calls go through NAT Gateway:
-
-```
-ECS Task (private subnet) → NAT Gateway → Internet → AWS Service
-```
-
-Every byte costs $0.045/GB in NAT data processing charges.
-
-### What VPC Endpoints Would Add
-
-```
-ECS Task (private subnet) → VPC Endpoint (private) → AWS Service
-```
-
-Traffic never leaves the AWS network.
-
-### Benefits
-
-| Benefit | Description |
-|---|---|
-| Cost reduction | Eliminates NAT data processing charges for AWS service traffic |
-| Lower latency | ~1-5ms faster per call (stays within AWS data center) |
-| Better security | Traffic never traverses public internet |
-
-### Cons
-
-| Con | Description |
-|---|---|
-| Interface Endpoint cost | ~$7.20/month per AZ per endpoint. With 2 AZs × 4 endpoints = ~$57.60/month fixed. |
-| S3 Gateway Endpoint | FREE — no hourly charge. Only savings, no cost. |
-| Break-even | If NAT data transfer < $57/month, VPC endpoints cost MORE. Need to measure first. |
-
-### Cost Breakdown
-
-| Service | Endpoint Type | Monthly Cost (2 AZs) |
-|---|---|---|
-| S3 | Gateway (free) | $0 |
-| SQS | Interface | $14.40 |
-| Secrets Manager | Interface | $14.40 |
-| CloudWatch Logs | Interface | $14.40 |
-| CloudWatch Metrics | Interface | $14.40 |
-| **Total** | | **~$57.60/month** |
-
-### Effort: ~2.5 days
-
-### Recommendation
-
-**Add S3 Gateway Endpoint immediately** (free, zero downside). Hold on Interface Endpoints until NAT costs exceed $60/month. At current volume (2 clients), NAT costs are likely $5-15/month.
-
----
-
 ## Feature 4: Async Manual Post with Progress Tracking
 
-**Diagram location:** Top center — "MANUAL POST (ASYNC FLOW)" steps 3-5: "Message placed on Client Post Queue (SQS)", "Job processed asynchronously", "Status pushed to UI"
+**Diagram location:** Top center — "MANUAL POST (ASYNC FLOW)": "Request sent to ASP.NET Core API", "Message placed on Client Post Queue (SQS)", "Job processed asynchronously", "Status pushed to UI"
 
 ### What We Have Currently
 
-Manual posts are **synchronous**:
+Manual posts are **synchronous** — user waits until all items are processed:
 
 ```
 User clicks → HTTP POST /api/post/42/items/101,102,103
@@ -388,219 +330,223 @@ User clicks → HTTP POST /api/post/42/items/101,102,103
 HTTP 200: { "recordsProcessed": 3, "recordsSuccess": 2, "recordsFailed": 1, "itemResults": [...] }
 ```
 
-Works well for 1-50 items. For 100+ items, browser/proxy timeouts become a risk.
+### Decision: Always Async (No Sync Path)
 
-### What Async Would Add
+ALL manual posts — whether 1 item or 50,000 items — will follow the same async flow:
 
 ```
-HTTP POST → HTTP 202 Accepted: { "executionId": "exec-abc-123", "status": "queued" }
+1. User clicks "Post Now" (1 item or 50,000 items — same behavior)
+2. API accepts request → returns HTTP 202 + executionId IMMEDIATELY
+3. Message goes to SQS → Start Workflow Lambda → Step Functions → ECS processes
+4. User polls GET /api/status/{executionId} for progress and final result
+```
 
-GET /api/status/exec-abc-123 → { "status": "processing", "progress": "250/500" }
+### Why Always Async (Not Hybrid)
 
-GET /api/status/exec-abc-123 → { "status": "completed", "recordsSuccess": 480, ... }
+| Reason | Explanation |
+|---|---|
+| **One code path** | No if/else between sync and async. Simpler to build, test, and maintain. |
+| **Consistent UX** | User always sees the same behavior regardless of batch size. No confusion about "why did it respond instantly for 5 items but give me a tracker for 50?" |
+| **Same pipeline for manual + scheduled** | Both go through SQS → Step Functions → ECS. Same retry, same monitoring, same debugging. |
+| **No browser timeout risk — ever** | Even for 1 item, the 202 response is instant. Zero risk of timeout. |
+| **Crash recovery** | If the server crashes mid-processing, SQS retries. With sync, the request is lost forever. |
+| **Future-proof** | When volumes grow from 50 items to 50,000 items, nothing changes in the architecture. |
+
+### What the User Sees
+
+```
+[Click "Post Now" — 3 items selected]
+     ↓
+[Instant: "Request accepted! Tracking: EXEC-7890"]
+     ↓
+[After 5 seconds, status shows: "Complete: 3 success, 0 failed"]
+```
+
+For small batches (1-10 items), the async processing completes in seconds. The user's first status check already shows "completed." It feels almost instant — just with an extra click to see the result.
+
+```
+[Click "Post Now" — 10,000 items selected]
+     ↓
+[Instant: "Request accepted! Tracking: EXEC-4567"]
+     ↓
+[Progress bar: "Processing... 2500 of 10000 (25%)"]
+     ↓
+[Later: "Complete: 9500 success, 500 failed. View details →"]
+```
+
+### API Changes
+
+```
+CURRENT:
+  POST /api/post/{jobId}/items/{itemIds}
+  → HTTP 200 (waits until done, returns full result)
+
+NEW:
+  POST /api/post/{jobId}/items/{itemIds}
+  → HTTP 202 Accepted (instant)
+  → Body: { "executionId": "exec-abc-123", "status": "queued" }
+
+  GET /api/status/{executionId}
+  → HTTP 200
+  → Body: { "status": "processing", "progress": "2500/5000", "percentComplete": 50 }
+  
+  GET /api/status/{executionId}  (when done)
+  → HTTP 200
+  → Body: { "status": "completed", "recordsSuccess": 4800, "recordsFailed": 200, "itemResults": [...] }
 ```
 
 ### Benefits
 
 | Benefit | Description |
 |---|---|
-| No browser timeouts | Large batches (500+) won't hit 30s/60s proxy timeout |
-| Better UX | User sees progress ("250 of 500...") instead of spinning wheel |
-| Retry for manual posts | If worker crashes mid-batch, SQS message retries. Sync mode loses the request. |
-| Consistent architecture | Scheduled and manual use same SQS → Worker pipeline |
+| No browser timeouts — ever | Even 50,000 items works. Response is always instant. |
+| Crash recovery | SQS retries if worker crashes. Nothing is lost. |
+| One pipeline for everything | Manual and scheduled use identical SQS → Step Functions → ECS path. |
+| Progress visibility | User sees real-time progress instead of a spinning wheel. |
+| Simpler code | One async path instead of maintaining both sync and async. |
+| Scales infinitely | 1 item or 1 lakh items — same architecture, same behavior. |
 
 ### Cons
 
 | Con | Description |
 |---|---|
-| Complex UI integration | Workflow UI must implement polling or WebSocket listener |
-| Latency for small batches | For 3-item post, async adds unnecessary round trips (submit + poll instead of one call) |
-| Queue delay | If post queue has 50 scheduled messages waiting, manual post goes behind them |
-| Dual code path | Either maintain sync + async, or force all through async (worse UX for small batches) |
-
-### Effort: ~8-10 days (backend) + UI team work
+| Extra click for small batches | User posts 3 items → gets tracking ID → must check status for result. One extra interaction vs instant response. |
+| UI change required | Workflow UI must replace the "wait for response" pattern with a "submit + poll progress" pattern. Needs a progress panel / notification system. |
+| Queue delay possible | If the SQS queue has 100 scheduled messages waiting, a manual 3-item post waits behind them. Solution: priority queue or separate manual-post queue. |
 
 ### Recommendation
 
-**Not needed now.** Typical manual batches are 1-50 items (5-30 seconds). Implement when users regularly post 200+ items manually or report browser timeouts.
+**Implement as part of Step Functions Hybrid (Feature 1).** The async flow is inherent in the Step Functions architecture — the API puts a message on SQS, Step Functions processes it, and the user polls for status. No separate implementation needed beyond the API returning 202 instead of 200.
 
 ---
 
-## Feature 5: Notifications — SNS in Both Flows + Push Status to UI
+## Feature 5: Notifications — SNS Email After Every Execution
 
 **Diagram location:**
-- Top section — "NOTIFICATIONS: Amazon SNS → Email Notifications, Slack Notifications, Teams Notifications, Other Channels"
-- Bottom of Invoice Posting Flow — "Amazon SNS Notifications" (post completion alerts)
+- Top section — "NOTIFICATIONS: Amazon SNS → Email Notifications"
+- Bottom of Invoice Posting Flow — "Amazon SNS Notifications" (post completion email)
 - Bottom of Feed Download Flow — "Amazon SNS Notifications: Feed Download Status, Success / Failure Alerts"
+
+**Channel: Email only.** No Slack, Teams, or other channels.
 
 ### What We Have Currently
 
-- **Scheduled posts:** Results written to `generic_execution_history`. No push notification to anyone. Users must check the Status API.
-- **Manual posts:** Synchronous response — user gets the result immediately.
-- **Failure alerts:** CloudWatch Alarm → SNS → Email to ops team (DLQ depth, PostFailedCount).
-- **Feed download completion:** No notification at all. Results logged to CloudWatch only.
+- **Scheduled posts:** Results written to `generic_execution_history`. Nobody is notified. Silent.
+- **Manual posts:** User polls status (async) — they triggered it, so they know.
+- **Failure alerts:** CloudWatch Alarm → SNS → Email ONLY when threshold exceeded (PostFailedCount > 5).
+- **Feed download completion:** Completely silent. Nobody knows unless they check logs.
 
-SNS is used in **one place only** — CloudWatch Alarms for failures.
+SNS is used in ONE place only — CloudWatch Alarms for infrastructure failures.
 
-### What the Diagram Shows
+### What We're Adding
 
-**SNS appears TWICE in the architecture** — serving two different purposes:
+**After EVERY scheduled execution (post or feed), send an email summarizing what happened:**
 
 ```
-1. TOP-LEVEL NOTIFICATIONS (centralized notification hub):
-   Amazon SNS → Email / Slack / Teams / Other
-   Purpose: Operational alerts, job status summaries, SLA notifications
+SUBJECT: [IPS AutoPost] InvitedClub Post — Completed (95 success, 5 failed)
 
-2. BOTTOM OF INVOICE POSTING FLOW:
-   After Step Functions completes → Amazon SNS Notification
-   Purpose: "Job 1001 (InvitedClub) completed: 95 success, 5 failed"
+Job: InvitedClub AutoPost (Job ID: 1001)
+Type: Scheduled Post
+Time: 08:00:05 — 08:02:45 UTC (2 min 40 sec)
 
-3. BOTTOM OF FEED DOWNLOAD FLOW:
-   After ECS Fargate feed completes → Amazon SNS Notification
-   Purpose: "Feed Download Status: Supplier feed completed, 1,200 records downloaded"
-            "Feed Download FAILED: COA feed timeout after 30 minutes"
+Results:
+  Records Processed: 100
+  Successful: 95
+  Failed: 5
+
+Failed Items:
+  Item 4523 — Oracle Fusion returned 503
+  Item 4567 — Image not found in S3
+  Item 4590 — RequesterId is empty
 ```
 
-### What We Need to Add
+```
+SUBJECT: [IPS AutoPost] InvitedClub Feed — Completed (1,200 suppliers)
 
-| Notification Point | Trigger | Message Content |
+Job: InvitedClub Supplier Feed (Job ID: 1001)
+Type: Scheduled Feed Download
+Time: 07:00:00 — 07:05:30 UTC (5 min 30 sec)
+
+Results:
+  Suppliers downloaded: 1,200
+  Supplier Addresses: 3,450
+  COA records: 850
+```
+
+### How It Works
+
+```
+1. POST NOTIFICATIONS:
+   Step Functions State 4 (Notify) → publishes to SNS Topic → Email sent
+
+2. FEED NOTIFICATIONS:
+   FeedWorker completes → publishes to SNS Topic → Email sent
+
+Both topics have one subscriber: ops-team@edenredpay.com
+```
+
+### Difference: Alerts vs Notifications
+
+| | Alerts (already have) | Notifications (adding) |
 |---|---|---|
-| Post batch completion (success) | AutoPostOrchestrator finishes batch | "InvitedClub Job 1001: 50 posted, 2 failed" |
-| Post batch failure | Unhandled exception in posting | "InvitedClub Job 1001: FAILED — Oracle Fusion timeout" |
-| Feed download success | FeedResult.Success returned | "InvitedClub Supplier Feed: 1,200 records downloaded" |
-| Feed download failure | FeedResult.Failed returned | "InvitedClub COA Feed: FAILED — connection timeout" |
+| **Purpose** | Something is WRONG | Here's what HAPPENED |
+| **Trigger** | Threshold exceeded (failure count > 5) | Every execution (success or failure) |
+| **Example** | "DLQ has messages — investigate!" | "InvitedClub batch complete: 95 success, 5 failed" |
+| **Urgency** | Immediate action needed | Informational — check when convenient |
+| **Volume** | Rare (only on failures) | Frequent (every batch, every feed) |
+
+### What We'll Build
+
+| Component | Description |
+|---|---|
+| SNS Topic: `ips-post-notifications-{env}` | Receives messages after every post batch |
+| SNS Topic: `ips-feed-notifications-{env}` | Receives messages after every feed download |
+| Email subscription | ops-team email subscribes to both topics |
+| Publish after post batch | In Step Functions Notify state |
+| Publish after feed download | In FeedWorker after feed completion |
+| Email template | Job name, client type, counts, duration, failed items |
 
 ### Benefits
 
 | Benefit | Description |
 |---|---|
-| Ops awareness | Team knows immediately when a scheduled batch completes or fails |
-| Feed visibility | Currently feed downloads complete silently — no one knows unless they check logs |
-| Proactive alerts | Don't wait for CloudWatch alarm thresholds — notify on every failure immediately |
-| Dual notification approach | CloudWatch Alarms for infrastructure issues (DLQ, crashes) + SNS for business outcomes (post results, feed status) |
+| **Feed failure visibility** | Currently completely silent. This is the biggest gap. |
+| **Daily ops visibility** | Team sees what ran overnight without checking logs. |
+| **Faster incident response** | Email at 3:15 AM says "InvitedClub failed" — no need to discover it at 9 AM. |
 
 ### Cons
 
 | Con | Description |
 |---|---|
-| Notification volume | 4 scheduled batches/day × 2 clients + 2 feed downloads/day = 10 notifications/day |
-| SNS cost | Negligible — first 1,000 emails/month are free |
-| UI integration (optional) | If pushing to Workflow UI, need a notification panel or WebSocket |
-
-### Effort: ~3-4 days
-
-| Work Item | Effort |
-|---|---|
-| Create SNS topic for posting notifications | 0.5 day |
-| Create SNS topic for feed notifications | 0.5 day |
-| Add SNS publish call in AutoPostOrchestrator after batch completion | 1 day |
-| Add SNS publish call in FeedWorker after feed download completion | 1 day |
-| Add to CloudFormation (topics, subscriptions, IAM) | 0.5 day |
-| **Total** | **~3.5 days** |
+| **Email volume at scale** | 40 clients × 4 runs/day = 160 emails/day. May want "failures only" mode or daily digest. |
+| **Not urgent** | For critical issues, CloudWatch Alarms (already exist) are faster and more reliable. |
 
 ### Recommendation
 
-**Medium priority.** The feed download notification is the most valuable — currently feeds complete silently and failures go unnoticed until someone manually checks. Post completion notifications are less critical since we already have CloudWatch Alarms for failures. Implement when the ops team wants proactive visibility into feed health.
+**Implement as part of Step Functions Hybrid (Feature 1).** The Notify state naturally publishes to SNS after every execution. For feeds, add SNS publish in FeedWorker. Email only.
 
 ---
 
-## Feature 6: Additional ERP Clients (Media, Greenthal, Akron, MDS, RapidPay)
+## Out of Scope (Future — When New Clients Are Onboarded)
 
-**Diagram location:** Purple box — "Supported Invoice Posting Clients" list and "ERP / External APIs" list
-
-### What We Have Currently
-
-Two plugins implemented:
-- `InvitedClubPlugin` (Oracle Fusion — 3-step posting + feed downloads)
-- `SevitaPlugin` (OAuth2 REST — validation + line grouping)
-
-Framework ready for more:
-- `IClientPlugin` interface
-- `PluginRegistry` (client_type → plugin mapping)
-- `GenericRestPlugin` framework (`DynamicRecord` + `generic_field_mapping` table)
-- `generic_job_configuration` for config-driven onboarding
-
-### What the Diagram Shows
-
-5+ additional clients: Media (Advantage/MarginWorld), Greenthal, Akron, MDS, RapidPay, Other ERPs, (40+ clients)
-
-### What's Needed Per New Client
-
-| Work Item | Effort |
-|---|---|
-| Write plugin class (implements `IClientPlugin`) | 2-5 days per client |
-| Create client-specific models (request/response) | 1-2 days |
-| Insert `generic_job_configuration` rows | 0.5 day |
-| Insert `generic_execution_schedule` rows | 0.5 day |
-| Write unit + integration tests | 2-3 days |
-| **Total per client** | **~6-11 days** |
-
-### Recommendation
-
-**Out of scope for now.** InvitedClub + Sevita are the priority. Other clients will be added one at a time after the platform is proven in production. The plugin architecture ensures each new client is isolated and doesn't affect existing ones.
-
----
-
-## Feature 7: External Feed Sources (SOAP, FTP/SFTP)
-
-**Diagram location:** Green box right side — "EXTERNAL FEED SOURCES: SOAP APIs, FTP/SFTP Servers, HTTP APIs, Other Sources"
-
-### What We Have Currently
-
-Only **REST API** feeds implemented (InvitedClub's Oracle Fusion REST endpoints for Suppliers, Addresses, Sites, COA).
-
-The `generic_feed_configuration` table supports `feed_source_type` values: `REST`, `FTP`, `SFTP`, `S3`, `FILE` — but only `REST` has a working implementation.
-
-### What's Missing
-
-| Source Type | Example Client | What's Needed |
-|---|---|---|
-| SOAP | Media (Advantage) | SOAP client + XML parsing |
-| FTP/SFTP | Future clients | FTP/SFTP download service |
-| S3 | Future clients | S3 file watcher/polling |
-| FILE | Legacy local files | File system reader |
-
-### Effort
-
-| Work Item | Effort |
-|---|---|
-| Generic SOAP feed download service | 3-4 days |
-| Generic FTP/SFTP download service | 2-3 days |
-| S3-based feed reader | 1-2 days |
-| **Total** | **~7-9 days** (when needed) |
-
-### Recommendation
-
-**Not needed now.** InvitedClub uses REST. Sevita has no feed download (`FeedResult.NotApplicable()`). Build these when a client that requires SOAP/FTP is onboarded.
+- **Additional ERP Clients** (Media, Greenthal, Akron, MDS, RapidPay, etc.) — will be added one at a time via plugin architecture when those clients are ready. Not needed for InvitedClub + Sevita.
+- **External Feed Sources (SOAP, FTP/SFTP)** — only REST feeds are needed for InvitedClub. Sevita has no feed download. SOAP/FTP/SFTP services will be built when a client that requires them is onboarded.
 
 ---
 
 ## Priority Summary
 
-| # | Feature | Effort | Benefit at 40+ Clients / Lakh Volumes | Priority |
-|---|---|---|---|---|
-| 1 | **Step Functions Hybrid (ECS processing)** | 14 days | Critical — parallel processing, visual debugging, client isolation | **HIGH — implement before scaling** |
-| 2 | **S3 Gateway Endpoint** (free) | 0.5 day | Better security, minor cost savings | **HIGH — Do immediately** |
-| 3 | **SNS Notifications (Post + Feed completion)** | 3.5 days | Feed failure visibility, ops awareness across 40 clients | **HIGH — essential at scale** |
-| 4 | **Parallel Batch Processing** | — | Included in Step Functions hybrid (Map State parallelism) | **Covered by Feature 1** |
-| 5 | **Async Manual Post** | 8-10 days | Prevents timeouts on lakh-level manual posts | **Medium — needed for large volumes** |
-| 6 | **VPC Interface Endpoints** | 2.5 days | Significant cost savings at 40+ client traffic volume | **Medium — measure NAT costs** |
-| 7 | **Additional ERP Clients** | 6-11 days each | Platform growth | **Ongoing — one at a time** |
-| 8 | **SOAP/FTP/SFTP Feed Sources** | 7-9 days | Required by some future clients | **When needed** |
+| # | Feature | Benefit at 40+ Clients / Lakh Volumes | Priority |
+|---|---|---|---|
+| 1 | **Step Functions Hybrid (ECS processing)** | Critical — parallel processing, visual debugging, client isolation | **HIGH — implement before scaling** |
+| 2 | **SNS Email Notifications (Post + Feed completion)** | Feed failure visibility, ops awareness across 40 clients | **HIGH — essential at scale** |
+| 3 | **Parallel Batch Processing** | Included in Step Functions hybrid (Map State parallelism) | **Covered by Feature 1** |
+| 4 | **Async Manual Post** | Included in Step Functions hybrid (API returns 202, user polls status) | **Covered by Feature 1** |
 
 ---
 
 ## Suggested Implementation Order
 
-### Phase 1 — Foundation for Scale (3 weeks)
-1. **S3 Gateway Endpoint** (0.5 day) — free, zero risk
-2. **Step Functions Hybrid Architecture** (14 days) — the backbone for 40+ clients and lakh-level volumes
-3. **SNS Notifications** (3.5 days) — visibility across all clients
-
-### Phase 2 — Production Hardening (when volume grows)
-4. **Async Manual Post** — when users post 200+ items manually
-5. **VPC Interface Endpoints** — when NAT costs exceed $60/month (likely at 40+ clients)
-
-### Phase 3 — Client Expansion (ongoing)
-6. **Additional ERP Clients** — one at a time, plugin by plugin
-7. **SOAP/FTP/SFTP** — when a client needs it
+### Phase 1 — Foundation for Scale
+1. **Step Functions Hybrid Architecture** — the backbone for 40+ clients and lakh-level volumes (includes parallel processing + async manual post)
+2. **SNS Email Notifications** — visibility across all clients (email only)
