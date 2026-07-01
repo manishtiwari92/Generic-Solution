@@ -46,24 +46,75 @@ AutoPostOrchestrator (single C# class — sequential processing):
 
 **Problem at scale:** If a client has 1 lakh (100,000) invoices at 3 seconds each = 300,000 seconds = **3.5 days** to process one batch sequentially. Completely unacceptable.
 
-### Target Architecture — Step Functions + .NET Lambda (1 Item Per Invocation)
+### Target Architecture — Step Functions + .NET Lambda (Multi-Mode Execution)
 
 **Key design decisions:**
 - **Step Functions** for orchestration, visibility, and retry logic
-- **.NET Lambda** for processing (1 item per Lambda invocation — always completes in 5-15 seconds, well under 15-minute limit)
-- **No ECS for posting** — fully serverless. ECS remains only for long-running feed downloads.
+- **Three execution modes** based on client type:
+  - `PER_ITEM` — 1 Lambda per item (InvitedClub, Sevita, Caliber — external API clients)
+  - `BATCH_FILE` — 1 Lambda for entire batch (Northstar, TMK, Jonas, Giti — file generation clients)
+  - `HYBRID` — batch file generation + per-item API calls after (GitiSGP, Canon Wire, Worldwide)
+- **ECS PostWorker retained as fallback** — batch file clients with 100K+ items stay on ECS (no Lambda timeout risk). Feature flag per client: `execution_target = 'LAMBDA' | 'ECS'`
 - **All manual posts are async** — API returns 202 immediately, user polls for status
+- **Incremental migration** — clients move from ECS to Lambda one at a time with rollback capability
 
 ```
 TARGET FLOW:
 
-MANUAL:    Workflow UI → .NET API → {client}-post-queue → Start Workflow Lambda → Step Functions
-SCHEDULED: EventBridge → {client}-post-queue (DIRECT TO SQS) → Start Workflow Lambda → Step Functions
+PER_ITEM (InvitedClub, Sevita, Caliber):
+  Trigger → {client}-post-queue → Start Lambda → Step Functions → Map (1 Lambda per item) → Aggregate → Notify
+
+BATCH_FILE (Northstar, TMK, Jonas, Giti, SCSPA, Diray, ClubEssentials, etc.):
+  Trigger → {client}-post-queue → Start Lambda → Step Functions → BatchProcessor (1 Lambda, ALL items) → Aggregate → Notify
+
+HYBRID (GitiSGP, Canon Wire, Worldwide):
+  Trigger → {client}-post-queue → Start Lambda → Step Functions → BatchFile Lambda → Map (per-item API) → Aggregate → Notify
 
 Each client has its own dedicated SQS queue (dynamically provisioned).
 The Start Workflow Lambda subscribes to ALL client queues via event source mappings.
 All manual posts are ASYNC — user gets HTTP 202 + executionId immediately.
 ```
+
+### Execution Mode Configuration
+
+New column on `generic_job_configuration`:
+
+```sql
+ALTER TABLE generic_job_configuration ADD execution_mode VARCHAR(20) NOT NULL DEFAULT 'PER_ITEM';
+-- Values: 'PER_ITEM', 'BATCH_FILE', 'HYBRID'
+
+ALTER TABLE generic_job_configuration ADD execution_target VARCHAR(10) NOT NULL DEFAULT 'LAMBDA';
+-- Values: 'LAMBDA', 'ECS'
+-- Allows per-client rollback: set to 'ECS' to route back to ECS PostWorker
+
+ALTER TABLE generic_job_configuration ADD max_concurrency INT NOT NULL DEFAULT 50;
+-- Per-client MaxConcurrency for PER_ITEM Map state (respects ERP API rate limits)
+
+ALTER TABLE generic_job_configuration ADD suspected_duplicates_queue_id INT NULL;
+-- For clients with duplicate detection (Northstar Golf jobs, Caliber)
+```
+
+**Client classification:**
+
+| Client | execution_mode | Why |
+|---|---|---|
+| InvitedClub | PER_ITEM | 3 API calls to Oracle Fusion per item, ~7s each |
+| Sevita | PER_ITEM | OAuth2 API call per item, ~3s each |
+| Caliber | PER_ITEM | Invoice + Payment + Document APIs per item, ~5-8s each |
+| Northstar | BATCH_FILE | CSV grouped by CompanyCode, no external API |
+| TMK | BATCH_FILE | Pipe-delimited with header/sequence, no external API |
+| Jonas/ClubJonas | BATCH_FILE | Grouped by month, no external API |
+| Giti | BATCH_FILE | H/L/S pipe-delimited + image ZIP, no external API |
+| SCSPA | BATCH_FILE | Pipe-delimited + AccountingDate SP, no external API |
+| Diray | BATCH_FILE | Digital/non-digital split CSV, no external API |
+| ClubEssentials | BATCH_FILE | Custom format file, no external API |
+| Cobalt | BATCH_FILE | Custom format per-item files, no external API |
+| S2K | BATCH_FILE | Custom format, no external API |
+| Quickbooks | BATCH_FILE | Pipe-delimited CSV, no external API |
+| Sharp | BATCH_FILE | Custom per-item files, no external API |
+| GitiSGP | HYBRID | H/L/S file + ApprovalAuditMergeAPI per item |
+| Canon | HYBRID | Pipe-delimited file + WireRequestMergeAPI per item |
+| Worldwide | HYBRID | CoverPage merge API per item (no file gen) |
 
 ### Trigger Paths
 
@@ -171,19 +222,17 @@ Code:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ TRIGGERS                                                                 │
+│ TRIGGERS (same for all clients)                                          │
 │                                                                          │
 │ SCHEDULED:                                                               │
-│   EventBridge Rule (ips-autopost-1001-post)                              │
-│     → drops message into: ips-post-invitedclub-prod                      │
-│   EventBridge Rule (ips-autopost-2001-post)                              │
-│     → drops message into: ips-post-sevita-prod                           │
+│   EventBridge Rule (ips-autopost-{jobId}-post)                           │
+│     → drops message into: ips-post-{clientType}-{env}                    │
 │                                                                          │
 │ MANUAL:                                                                  │
 │   Workflow UI → POST /api/post/{jobId}/items/{itemIds}                   │
-│     → .NET API looks up client_type from jobId                           │
-│     → derives queue: ips-post-{clientType}-{env}                         │
-│     → sends message to that queue                                        │
+│     → .NET API looks up client_type + execution_target from jobId        │
+│     → IF execution_target == 'ECS': route to ECS PostWorker (existing)   │
+│     → IF execution_target == 'LAMBDA': derives queue, sends message      │
 │     → returns HTTP 202: { executionId: "exec-abc-123", status: "queued" }│
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
@@ -198,77 +247,133 @@ Code:
                                 │ (Lambda event source mapping — all queues)
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ START WORKFLOW LAMBDA (.NET — lightweight)                                │
+│ START WORKFLOW LAMBDA (.NET — lightweight, same for all)                  │
 │   • Validate SQS message                                                 │
-│   • Load basic config (job_id, client_type, is_active)                   │
+│   • Load basic config (job_id, client_type, execution_mode)              │
 │   • Start Step Functions execution                                       │
-│   • Pass only metadata: { jobId, clientType, triggerType, executionId }  │
+│   • Pass: { jobId, clientType, triggerType, executionId, executionMode } │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
                                 ▼
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║ AWS STEP FUNCTIONS                                                         ║
+║ AWS STEP FUNCTIONS — UNIFIED STATE MACHINE (branches by execution_mode)    ║
 ║                                                                            ║
-║  State 1: PREPARE EXECUTION (.NET Lambda)                                  ║
+║  State 1: PREPARE EXECUTION (.NET Lambda — same for all modes)             ║
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
-║  │ • Load full job config from DB                                     │    ║
-║  │ • OnBeforePostAsync logic (load ValidIds for Sevita)              │    ║
-║  │ • Fetch all pending ItemIds: SELECT ItemId WHERE PostInProcess=0  │    ║
-║  │ • Return: { itemIds: [101, 102, 103, ...], totalCount: 5000 }    │    ║
-║  │                                                                    │    ║
-║  │ NOTE: Only returns ItemId array (integers) — NOT full workitem    │    ║
-║  │ data. 5000 integers = ~25KB. Well within 256KB payload limit.     │    ║
+║  │ • Load full job config from DB (including execution_mode)          │    ║
+║  │ • OnBeforePostAsync logic:                                        │    ║
+║  │   → Sevita: load ValidIds, cache to S3                            │    ║
+║  │   → InvitedClub: run RetryPostImages                             │    ║
+║  │   → Caliber: check future-dated invoice queue (1st of month)     │    ║
+║  │ • Fetch all pending ItemIds: WHERE PostInProcess=0                │    ║
+║  │ • Cache config to S3: s3://ips-temp/{executionId}/config.json     │    ║
+║  │ • For BATCH_FILE/HYBRID modes ONLY:                               │    ║
+║  │   → Fetch full header+detail DataSet (all items in one query)     │    ║
+║  │   → Serialize to S3: s3://ips-temp/{executionId}/batch-data.json  │    ║
+║  │ • Return: { executionMode, itemIds, totalCount, maxConcurrency,   │    ║
+║  │             configS3Key, batchDataS3Key }                         │    ║
 ║  └───────────────────────────────────┬───────────────────────────────┘    ║
 ║                                      │                                     ║
-║  State 2: PROCESS ITEMS (Map State — 1 item per Lambda)                    ║
+║  ┌───────────────────────────────────┴───────────────────────────────┐    ║
+║  │              CHOICE STATE (branch by executionMode)                │    ║
+║  │   "PER_ITEM"   → State 2A (Map — 1 Lambda per item)              │    ║
+║  │   "BATCH_FILE" → State 2B (Single Lambda — all items)             │    ║
+║  │   "HYBRID"     → State 2C (Batch file + per-item API calls)       │    ║
+║  └───────┬─────────────────────────────┬──────────────────┬─────────┘    ║
+║          ▼                             ▼                  ▼               ║
+║                                                                            ║
+║  ═══ PATH A: PER_ITEM (InvitedClub, Sevita, Caliber) ═══════════════════  ║
+║                                                                            ║
+║  State 2A: PROCESS ITEMS (Map State — 1 Lambda per item)                   ║
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
-║  │ MaxConcurrency: 50 (configurable per client)                       │    ║
+║  │ MaxConcurrency: from config (default 50, per-client override)      │    ║
 ║  │ Input: each itemId from the array                                 │    ║
 ║  │                                                                    │    ║
 ║  │   ┌─────────────────────────────────────────────────────────────┐ │    ║
-║  │   │ BATCH PROCESSOR LAMBDA (.NET — 1 item per invocation)       │ │    ║
+║  │   │ ITEM PROCESSOR LAMBDA (.NET — 1 item per invocation)        │ │    ║
 ║  │   │                                                              │ │    ║
-║  │   │   Receives: { jobId, clientType, itemId }                   │ │    ║
+║  │   │   Receives: { jobId, clientType, itemId, configS3Key }      │ │    ║
 ║  │   │                                                              │ │    ║
-║  │   │   • Loads config from DB                                    │ │    ║
-║  │   │   • Loads workitem header + detail data                     │ │    ║
-║  │   │   • Sets PostInProcess = 1                                  │ │    ║
-║  │   │   • Gets image from S3 (if applicable)                     │ │    ║
-║  │   │   • Calls ERP API (Oracle Fusion / Sevita)                 │ │    ║
-║  │   │   • Routes workitem to success/fail queue                  │ │    ║
-║  │   │   • Writes history per item                                │ │    ║
-║  │   │   • Clears PostInProcess = 0                               │ │    ║
+║  │   │   • Load config from S3 cache (NOT from DB every time)      │ │    ║
+║  │   │   • Load workitem header + detail data from DB              │ │    ║
+║  │   │   • Set PostInProcess = 1                                   │ │    ║
+║  │   │   • Get image from S3 (if applicable)                      │ │    ║
+║  │   │   • Call ERP API:                                           │ │    ║
+║  │   │     → InvitedClub: PostInvoice→PostAttachment→CalcTax      │ │    ║
+║  │   │     → Caliber: PostInvoice→PostPayment→PostDocument         │ │    ║
+║  │   │     → Sevita: PostInvoice (JSON array payload)             │ │    ║
+║  │   │   • Route workitem (WORKITEM_ROUTE SP)                     │ │    ║
+║  │   │   • Write history per item                                 │ │    ║
+║  │   │   • Clear PostInProcess = 0 (in finally)                   │ │    ║
 ║  │   │   • Returns: { itemId, success, queueId, errorMsg }        │ │    ║
-║  │   │                                                              │ │    ║
-║  │   │   Time: 5-15 seconds (well under 15 min limit)             │ │    ║
+║  │   │   Time: 5-15 seconds | Memory: 512MB                       │ │    ║
 ║  │   └─────────────────────────────────────────────────────────────┘ │    ║
-║  │                                                                    │    ║
-║  │ 50 Lambdas running simultaneously = 50 items processed in parallel│    ║
 ║  │                                                                    │    ║
 ║  │ Retry per item:                                                   │    ║
 ║  │   If Oracle returns 503 → wait 5s → retry same item (up to 2x)  │    ║
 ║  │   If still fails → mark failed, continue with next items         │    ║
 ║  └───────────────────────────────────┬───────────────────────────────┘    ║
 ║                                      │                                     ║
-║  State 3: AGGREGATE RESULTS (.NET Lambda)                                  ║
+║  ═══ PATH B: BATCH_FILE (Northstar, TMK, Jonas, Giti, SCSPA, CSV) ═══════ ║
+║                                                                            ║
+║  State 2B: BATCH FILE PROCESSOR (Single Lambda — ALL items at once)        ║
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
-║  │ • Collect all item results from Map State outputs                  │    ║
+║  │ Receives: { jobId, clientType, itemIds, batchDataS3Key }          │    ║
+║  │                                                                    │    ║
+║  │ • Load full header+detail DataSet from S3 cache                   │    ║
+║  │ • Run validations (duplicate detection, ChargeAccount, etc.)      │    ║
+║  │ • Group items by key (CompanyCode, Month, InvoiceType)            │    ║
+║  │ • Generate file(s) per group (CSV, pipe-delimited, H/L/S, Excel) │    ║
+║  │ • Write files to S3: s3://ips-output-files/{clientType}/          │    ║
+║  │ • Route ALL items via parallel DB calls (SemaphoreSlim=20):       │    ║
+║  │   → WORKITEM_ROUTE + GENERALLOG_INSERT + history per item         │    ║
+║  │ • Returns: { total, success, failed, filesGenerated[] }           │    ║
+║  │                                                                    │    ║
+║  │ Time: 10K→20s, 20K→30s, 50K→60s, 100K→3.5min                    │    ║
+║  │ Memory: 1024MB | Timeout: 5 minutes                               │    ║
+║  │ NO external API calls. NO PostInProcess flag needed.              │    ║
+║  │                                                                    │    ║
+║  │ NOTE: For clients with 500K+ items, set execution_target='ECS'.   │    ║
+║  │ ECS PostWorker has no timeout limit.                              │    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  ═══ PATH C: HYBRID (GitiSGP, Canon Wire, Worldwide) ════════════════════ ║
+║                                                                            ║
+║  State 2C-1: BATCH FILE GENERATION (Single Lambda)                         ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Generate file (same as Path B)                                   │    ║
+║  │ • Copy images to output folder (Giti jobs)                        │    ║
+║  │ • Route file-only items to success queue                          │    ║
+║  │ • Returns: { apiItemIds: [...items needing API call...] }         │    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  State 2C-2: POST-FILE API CALLS (Map State — per-item)                    ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ MaxConcurrency: 10 (these APIs are typically rate-limited)         │    ║
+║  │ • GitiSGP: Call ApprovalAuditMergeAPI (Login→POST→Logout)        │    ║
+║  │ • Canon: Call WireRequestMergeAPI (Login→POST→Logout)             │    ║
+║  │ • Worldwide: Call CoverPage merge via Asset API                   │    ║
+║  │ • Route item to success/fail queue                                │    ║
+║  │ • Returns: { itemId, success, errorMsg }                          │    ║
+║  └───────────────────────────────────┬───────────────────────────────┘    ║
+║                                      │                                     ║
+║  ═══ SHARED STATES (all paths converge here) ═════════════════════════════ ║
+║                                                                            ║
+║  State 3: AGGREGATE RESULTS (.NET Lambda — same for all modes)             ║
+║  ┌───────────────────────────────────────────────────────────────────┐    ║
+║  │ • Collect results from whichever path ran (2A, 2B, or 2C)         │    ║
 ║  │ • Count success/failed                                            │    ║
 ║  │ • Write generic_execution_history                                 │    ║
 ║  │ • Update LastPostTime                                             │    ║
 ║  │ • Publish CloudWatch metrics                                      │    ║
-║  │ • Send batch-level emails:                                        │    ║
-║  │   → InvitedClub: image failure email to helpdesk (if any)        │    ║
-║  │   → Sevita: notification email with failed records table          │    ║
-║  │ • Check output file config:                                       │    ║
-║  │   → If generate_output_file=true: call .NET API to generate file │    ║
+║  │ • Send batch-level emails (plugin-specific)                       │    ║
+║  │ • Clean up S3 temp: s3://ips-temp/{executionId}/*                 │    ║
 ║  │ • Return: { total: 5000, success: 4800, failed: 200 }            │    ║
 ║  └───────────────────────────────────┬───────────────────────────────┘    ║
 ║                                      │                                     ║
 ║  State 4: NOTIFY (.NET Lambda)                                             ║
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
 ║  │ • Publish ONE email via SNS (entire execution summary)            │    ║
-║  │ • "Client X: 5,000 processed, 4,800 success, 200 failed"         │    ║
 ║  │ • ONE notification per execution — NOT per item                   │    ║
 ║  └───────────────────────────────────────────────────────────────────┘    ║
 ║                                                                            ║
@@ -276,6 +381,7 @@ Code:
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
 ║  │ • Log failure, mark execution as FAILED in DB                     │    ║
 ║  │ • Send failure email via SNS                                      │    ║
+║  │ • Clean up S3 temp files                                          │    ║
 ║  └───────────────────────────────────────────────────────────────────┘    ║
 ║                                                                            ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
@@ -411,19 +517,20 @@ var connectionString = "Server=ips-autopost-proxy-prod.proxy-cmrmduasa2gk.us-eas
 
 Same connection string format — just a different hostname. No other code changes.
 
-### Why .NET Lambda (1 Item) Instead of ECS
+### Why .NET Lambda Instead of ECS (Per Execution Mode)
 
-| Aspect | .NET Lambda (1 item) | ECS (1000 items/chunk) |
-|---|---|---|
-| **Timeout risk** | None — 7 sec per item << 15 min limit | None (no limit) |
-| **Infrastructure** | Zero — fully serverless | Docker, ECR, task definitions, scaling config |
-| **Cost for small batches** | ~$0.001 for 50 items | Overkill — ECS spin-up cost dominates |
-| **Cost for large batches** | ~$1.50 for 1 lakh items | ~$0.66 for 1 lakh items |
-| **Scale to zero** | Yes — no cost when idle | No — MinCapacity=1 always running |
-| **Deployment** | Zip upload or container to Lambda | Docker build + ECR push + ECS deploy |
-| **Per-item isolation** | Complete — each item is a separate invocation | Items share a process |
-| **Per-item retry** | Step Functions retries that specific item | Entire chunk retried |
-| **Cold start** | 1.5-3 sec first call, then warm. With 40 clients → mostly warm. | None |
+| Aspect | PER_ITEM Lambda | BATCH_FILE Lambda | ECS (fallback) |
+|---|---|---|---|
+| **Use case** | External API per item | File gen (no API) | 500K+ items or network share |
+| **Timeout risk** | None — 7s << 15 min | None — 100K items in 3.5 min | None (no limit) |
+| **Infrastructure** | Zero — fully serverless | Zero — fully serverless | Docker, ECR, task defs |
+| **Cost (5K items)** | ~$0.86 | ~$0.001 (1 Lambda call!) | $35/month fixed |
+| **Parallelism** | 50 concurrent items | N/A (1 Lambda, all items) | SemaphoreSlim in-process |
+| **Per-item retry** | Step Functions auto-retry | N/A (re-run entire batch) | Manual retry logic |
+| **Per-item visibility** | SF console shows each item | 1 execution entry | CloudWatch logs only |
+| **Scale to zero** | Yes — no cost when idle | Yes | No — MinCapacity=1 |
+| **Network shares** | ❌ Cannot access | ❌ Cannot access | ✅ Can mount shares |
+| **Memory limit** | 512MB (1 item) | 2048MB (full DataSet) | No limit |
 
 ### Time Per Item (Will It Fit Under 15 Minutes?)
 
@@ -695,29 +802,66 @@ FEED NOTIFICATIONS:
 
 | # | Feature | Benefit | Priority |
 |---|---|---|---|
-| 1 | **Step Functions + .NET Lambda (1 item per invocation)** | Parallel processing, per-item visibility, serverless, scales to zero | **HIGH — implement before scaling** |
-| 2 | **Async Manual Post** | Included in Feature 1 (API returns 202, user polls status) | **Covered by Feature 1** |
-| 3 | **SNS Email Notifications** | Ops visibility — know when batches/feeds complete or fail | **HIGH — part of Feature 1** |
+| 1A | **ECS Parallel Processing (SemaphoreSlim)** | Immediate 10-50× speedup, zero new infra | **CRITICAL — do first** |
+| 1B | **Per-Client SQS Queues** | Client isolation, per-client DLQ/monitoring | **HIGH — foundation** |
+| 1C | **Step Functions + Lambda (PER_ITEM)** | Serverless parallel for API clients | **HIGH — after 1A proves parallelism** |
+| 1D | **Batch File Plugin Framework** | Support 20+ file-generation clients | **HIGH — before scaling to 40+ clients** |
+| 1E | **Hybrid Mode + Caliber Plugin** | Complete client coverage | **MEDIUM — after 1C+1D stable** |
+| 2 | **Async Manual Post (HTTP 202)** | UI responsiveness at scale | **Covered by Phase 1C** |
+| 3 | **SNS Email Notifications** | Ops visibility per execution | **Part of Phase 1C (State 4)** |
 
 ---
 
 ## Suggested Implementation Order
 
-### Phase 1 — Foundation for Scale
-1. **Step Functions + .NET Lambda architecture** — includes:
-   - Per-client SQS queues (dynamically created/managed by Scheduler Lambda)
-   - RDS Proxy (connection pooling for Lambda-at-scale — essential for 40+ clients)
-   - Start Workflow Lambda (SQS consumer, subscribes to all client queues)
-   - Prepare Execution Lambda (fetch ItemIds, load config)
-   - Batch Processor Lambda (1 item per invocation, plugin logic)
-   - Aggregate Results Lambda (execution history, metrics, emails, output file)
-   - Notify Lambda (SNS email)
-   - Error Handler Lambda (failure SNS)
-   - Step Functions state machine (ASL JSON)
-   - Scheduler Lambda update (queue provisioning + EventBridge rule targeting per-client queue)
-   - CloudFormation (state machine, IAM roles, Lambda functions, RDS Proxy)
-2. **API change** — return 202 instead of 200, route to correct client queue based on job config
-3. **Status API enhancement** — add progress tracking from Step Functions execution status
+### Phase 1A — ECS Parallel Processing (1-2 weeks, immediate value)
+1. Add `SemaphoreSlim`-based parallelism to `AutoPostOrchestrator` for PER_ITEM clients
+2. Add `max_concurrency` column to `generic_job_configuration` (configurable per client)
+3. Immediate 10-50× speedup for InvitedClub/Sevita with zero new infrastructure
+4. This solves the sequential bottleneck TODAY while Lambda architecture is built
+
+### Phase 1B — Per-Client SQS Queues (2-3 weeks)
+1. Scheduler Lambda provisions queues dynamically (CreateQueue is idempotent)
+2. EventBridge targets per-client queue instead of shared `ips-post-queue`
+3. PostWorker consumes from per-client queue (still ECS during transition)
+4. Client isolation achieved without Lambda
+
+### Phase 1C — Step Functions + Lambda for PER_ITEM Clients (4-6 weeks)
+1. RDS Proxy deployment (mandatory for Lambda-at-scale)
+2. Add `execution_mode` and `execution_target` columns to `generic_job_configuration`
+3. Implement Prepare + Item Processor + Aggregate + Notify Lambdas
+4. Step Functions state machine with Choice state (3 paths)
+5. Feature flag: `execution_target='LAMBDA'` per client
+6. Migrate ONE client (InvitedClub) first, validate for 2 weeks
+7. Then migrate Sevita, then Caliber (one at a time)
+8. Keep `execution_target='ECS'` as instant rollback
+
+### Phase 1D — Batch File Plugin Framework (3-4 weeks)
+1. Implement `IFileGenerationService` (CSV, pipe-delimited, Excel output adapters)
+2. Implement `GreenthalPlugin` with internal strategy routing by `JobType`
+3. Implement Batch File Processor Lambda (Path B in state machine)
+4. Implement file strategies: Northstar, Giti, GitiSGP, TMK, Jonas, generic CSV
+5. Add `suspected_duplicates_queue_id` to `generic_job_configuration`
+6. Test with Northstar (simplest batch file client) first
+7. Network share clients remain on ECS; S3-output clients go to Lambda
+
+### Phase 1E — Hybrid Mode + Remaining Clients (2-3 weeks)
+1. Implement Hybrid path (State 2C-1 + 2C-2) for GitiSGP, Canon, Worldwide
+2. Implement `CalibarPlugin` (Invoice + Payment + Document + Feed download)
+3. SNS email notifications after every execution (State 4)
+4. API change: return 202 + progress tracking via Step Functions execution status
+
+### Phase 2 — Decommission ECS PostWorker for Lambda Clients (after 30 days stable)
+1. Only after all Lambda-target clients are stable for 30+ days
+2. ECS PostWorker remains for: feed downloads, network-share file clients, 500K+ batch clients
+3. Reduce ECS PostWorker capacity (fewer tasks needed — only handles remaining clients)
+
+### Rollback Plan (per phase)
+- Phase 1A: Revert `max_concurrency` to 1 (sequential processing)
+- Phase 1B: Point EventBridge back to shared `ips-post-queue`
+- Phase 1C: Set `execution_target='ECS'` per client (instant, no deployment)
+- Phase 1D: Set `execution_target='ECS'` for batch file clients
+- Phase 1E: Same as 1D — feature flag rollback
 
 ---
 
