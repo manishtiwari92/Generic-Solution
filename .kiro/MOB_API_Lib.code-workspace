@@ -5,12 +5,6 @@
 		},
 		{
 			"path": ".."
-		},
-		{
-			"path": "../../GenericMissingInvoicesProcess"
-		},
-		{
-			"path": "../../../JobCreationModule/JobCreationAPI"
 		}
 	],
 	"settings": {}
