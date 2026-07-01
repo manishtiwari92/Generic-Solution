@@ -267,11 +267,11 @@ Code:
 ║  │   → Caliber: check future-dated invoice queue (1st of month)     │    ║
 ║  │ • Fetch all pending ItemIds: WHERE PostInProcess=0                │    ║
 ║  │ • Cache config to S3: s3://ips-temp/{executionId}/config.json     │    ║
-║  │ • For BATCH_FILE/HYBRID modes ONLY:                               │    ║
-║  │   → Fetch full header+detail DataSet (all items in one query)     │    ║
-║  │   → Serialize to S3: s3://ips-temp/{executionId}/batch-data.json  │    ║
 ║  │ • Return: { executionMode, itemIds, totalCount, maxConcurrency,   │    ║
-║  │             configS3Key, batchDataS3Key }                         │    ║
+║  │             configS3Key }                                         │    ║
+║  │                                                                    │    ║
+║  │ NOTE: Batch data is NOT cached to S3. The Batch Processor Lambda  │    ║
+║  │ queries DB directly (1 Lambda, 1 query — no pressure).            │    ║
 ║  └───────────────────────────────────┬───────────────────────────────┘    ║
 ║                                      │                                     ║
 ║  ┌───────────────────────────────────┴───────────────────────────────┐    ║
@@ -318,9 +318,12 @@ Code:
 ║                                                                            ║
 ║  State 2B: BATCH FILE PROCESSOR (Single Lambda — ALL items at once)        ║
 ║  ┌───────────────────────────────────────────────────────────────────┐    ║
-║  │ Receives: { jobId, clientType, itemIds, batchDataS3Key }          │    ║
+║  │ Receives: { jobId, clientType, itemIds, configS3Key }             │    ║
 ║  │                                                                    │    ║
-║  │ • Load full header+detail DataSet from S3 cache                   │    ║
+║  │ • Load config from S3 cache (credentials already resolved)        │    ║
+║  │ • Query DB directly for full header+detail DataSet (ONE query)    │    ║
+║  │   → Same SP as ECS: WFGeneric_Post_GetHeaderDataByJobID           │    ║
+║  │   → 20K items: ~500ms. No S3 serialization overhead.             │    ║
 ║  │ • Run validations (duplicate detection, ChargeAccount, etc.)      │    ║
 ║  │ • Group items by key (CompanyCode, Month, InvoiceType)            │    ║
 ║  │ • Generate file(s) per group (CSV, pipe-delimited, H/L/S, Excel) │    ║
@@ -367,7 +370,7 @@ Code:
 ║  │ • Update LastPostTime                                             │    ║
 ║  │ • Publish CloudWatch metrics                                      │    ║
 ║  │ • Send batch-level emails (plugin-specific)                       │    ║
-║  │ • Clean up S3 temp: s3://ips-temp/{executionId}/*                 │    ║
+║  │ • Clean up S3 temp: s3://ips-temp/{executionId}/* (config only)    │    ║
 ║  │ • Return: { total: 5000, success: 4800, failed: 200 }            │    ║
 ║  └───────────────────────────────────┬───────────────────────────────┘    ║
 ║                                      │                                     ║
